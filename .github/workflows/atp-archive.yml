@@ -1,19 +1,19 @@
-name: Build ATP match archive
+name: Build importable ATP and WTA CSV archives
 
 on:
   push:
-    branches:
-      - work/stage-2-model-training
+    branches: [main, "work/**"]
     paths:
-      - ".github/workflows/atp-archive.yml"
+      - "scripts/download_tour_archives.py"
       - "scripts/download_atp_archive.py"
+      - ".github/workflows/atp-archive.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build-archive:
+  build-archives:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -24,33 +24,53 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download and combine ATP seasons 2010–2024
-        run: python scripts/download_atp_archive.py --start 2010 --end 2024
+      - name: Download current ATP and WTA archives
+        run: |
+          YEAR="$(date -u +%Y)"
+          echo "ARCHIVE_YEAR=$YEAR" >> "$GITHUB_ENV"
+          python scripts/download_tour_archives.py --start 2010 --end "$YEAR"
 
-      - name: Package combined CSV and source files
+      - name: Package importable CSVs and source attribution
         run: |
           mkdir -p dist
-          cp data/benchmark/atp_2010_2024.csv dist/
-          cp benchmarks/atp_archive_2010_2024.md dist/README_benchmark.md
+          cp "data/benchmark/atp_2010_${ARCHIVE_YEAR}.csv" dist/
+          cp "data/benchmark/wta_2010_${ARCHIVE_YEAR}.csv" dist/
           cat > dist/SOURCE_AND_LICENSE.txt <<'EOF'
-          Source data: Jeff Sackmann / Tennis Abstract ATP match results,
-          obtained from the public mirror farhadGithub/tennis-atp-data.
-          Source project: https://github.com/farhadGithub/tennis-atp-data
-          License stated by the source project: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0).
-          This archive is intended for non-commercial research and evaluation.
-          For commercial use or redistribution outside the license, obtain permission from the rights holder.
+          Primary data: Jeff Sackmann / Tennis Abstract ATP and WTA match results.
+          Archival mirror: https://github.com/Aneeshers/tennis-sackmann-archive
+          Primary license: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0).
+
+          Current-season supplement: Valuebetennis, Tennis results and odds since 2021.
+          Source: https://www.valuebetennis.com/en/donnees.htm
+          Supplement license: Creative Commons Attribution 4.0 (CC BY 4.0).
+
+          These combined files include CC BY-NC-SA material and are intended for
+          non-commercial research/evaluation. Attribute Jeff Sackmann / Tennis Abstract
+          and Valuebetennis. Obtain permission from the rights holders for commercial use.
+          EOF
+          cat > dist/README_ARCHIVES.txt <<EOF
+          Tennis Predict AI — importable historical match archives
+          Seasons: 2010–${ARCHIVE_YEAR}
+          CSV schema: date, player_a, player_b, winner, surface
+          Archive date cutoff: build-day UTC, inclusive.
+          Import both files using the app's multi-select CSV importer.
+          Results are deduplicated by date, winner and loser. Top-tour current-season results
+          after the primary mirror snapshot are supplemented from Valuebetennis data.
           EOF
           cd dist
-          zip -9 tennis_predict_atp_2010_2024.zip atp_2010_2024.csv README_benchmark.md SOURCE_AND_LICENSE.txt
-          sha256sum tennis_predict_atp_2010_2024.zip > SHA256SUMS.txt
+          zip -9 "tennis_predict_atp_wta_2010_${ARCHIVE_YEAR}.zip" "atp_2010_${ARCHIVE_YEAR}.csv" "wta_2010_${ARCHIVE_YEAR}.csv" README_ARCHIVES.txt SOURCE_AND_LICENSE.txt
+          sha256sum "tennis_predict_atp_wta_2010_${ARCHIVE_YEAR}.zip" > SHA256SUMS.txt
 
-      - name: Upload importable CSV
+      - name: Upload ready-to-import CSV archives
         uses: actions/upload-artifact@v4
         with:
-          name: tennis-predict-atp-2010-2024
+          name: tennis-predict-atp-wta-csv-archives-2010-${{ env.ARCHIVE_YEAR }}
           path: |
-            dist/tennis_predict_atp_2010_2024.zip
-            dist/atp_2010_2024.csv
+            dist/atp_2010_*.csv
+            dist/wta_2010_*.csv
+            dist/tennis_predict_atp_wta_2010_*.zip
+            dist/README_ARCHIVES.txt
+            dist/SOURCE_AND_LICENSE.txt
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
