@@ -35,7 +35,7 @@ fun ModelTrainingCard(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("Этап 2 — проверка и выбор модели") }
+    var message by remember { mutableStateOf("Сравним варианты по историческим результатам") }
     var report by remember { mutableStateOf<ModelComparisonReport?>(null) }
 
     Card {
@@ -63,7 +63,7 @@ fun ModelTrainingCard(
                     },
                     fontWeight = FontWeight.SemiBold,
                     color = if (r.logisticSelectedForPrediction) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text("Выбранный вариант: ${r.selectedModelName}")
                 Text(
