@@ -65,6 +65,8 @@ private fun PredictorScreen() {
     var selectedRatingSurface by remember { mutableStateOf<Surface?>(null) }
     var surfaceMenuExpanded by remember { mutableStateOf(false) }
     var historicalMessage by remember { mutableStateOf<String?>(null) }
+    var trainedModel by remember { mutableStateOf<LogisticRegressionModel?>(null) }
+    var predictionSource by remember { mutableStateOf("Источник: базовая модель Elo") }
 
     val ratingSnapshot = remember(storedMatches) { RatingCalculator.calculate(storedMatches) }
 
@@ -74,6 +76,7 @@ private fun PredictorScreen() {
 
     LaunchedEffect(database) {
         storedMatches = withContext(Dispatchers.IO) { database.loadMatches() }
+        trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
     }
 
     val csvPicker = rememberLauncherForActivityResult(
@@ -176,7 +179,7 @@ private fun PredictorScreen() {
 
                 Box {
                     OutlinedButton(onClick = { surfaceMenuExpanded = true }) {
-                        Text("Рейтинги из истории: ${selectedRatingSurface?.displayName ?: "Все покрытия"}")
+                        Text("Рейтинги / покрытие: ${selectedRatingSurface?.displayName ?: "Все покрытия"}")
                     }
                     DropdownMenu(
                         expanded = surfaceMenuExpanded,
@@ -200,6 +203,10 @@ private fun PredictorScreen() {
                         }
                     }
                 }
+                Text(
+                    "Покрытие применяется к признакам модели. При выборе «Все покрытия» для будущего матча используется хард.",
+                    style = MaterialTheme.typography.bodySmall
+                )
 
                 OutlinedButton(
                     onClick = {
@@ -234,7 +241,45 @@ private fun PredictorScreen() {
                             else -> null
                         }
                         if (error == null) {
-                            prediction = TennisPredictor.predict(playerA.trim(), playerB.trim(), a!!, b!!)
+                            val enteredA = a!!
+                            val enteredB = b!!
+                            val matchA = playerA.trim()
+                            val matchB = playerB.trim()
+                            val matchSurface = selectedRatingSurface ?: Surface.HARD
+                            val modelSnapshot = trainedModel
+                            val historySnapshot = storedMatches.toList()
+                            scope.launch {
+                                val learnedProbability = withContext(Dispatchers.Default) {
+                                    modelSnapshot?.let {
+                                        ModelTrainer.predictFutureProbability(
+                                            history = historySnapshot,
+                                            playerA = matchA,
+                                            playerB = matchB,
+                                            surface = matchSurface,
+                                            eloA = enteredA,
+                                            eloB = enteredB,
+                                            model = it
+                                        )
+                                    }
+                                }
+                                if (learnedProbability != null) {
+                                    prediction = Prediction(
+                                        playerA = matchA,
+                                        playerB = matchB,
+                                        probabilityA = learnedProbability,
+                                        probabilityB = 1.0 - learnedProbability,
+                                        ratingDifference = enteredA - enteredB
+                                    )
+                                    predictionSource = "Источник: логистическая регрессия (${modelSnapshot?.profileName ?: "модель"})"
+                                } else {
+                                    prediction = TennisPredictor.predict(matchA, matchB, enteredA, enteredB)
+                                    predictionSource = when {
+                                        modelSnapshot == null -> "Источник: Elo — обученной модели пока нет"
+                                        !modelSnapshot.recommendedForPrediction -> "Источник: Elo — модель не улучшила качество на временной проверке"
+                                        else -> "Источник: Elo — история изменилась после обучения; переобучи модель"
+                                    }
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -253,6 +298,7 @@ private fun PredictorScreen() {
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                Text(predictionSource, style = MaterialTheme.typography.bodySmall)
                 Text(prediction.playerA)
                 Text(
                     TennisPredictor.formatPercent(prediction.probabilityA),
@@ -308,6 +354,8 @@ private fun PredictorScreen() {
                 )
             }
         }
+
+        ModelTrainingCard(matches = storedMatches, onModelTrained = { trainedModel = it })
 
         RankingCard(
             title = "Общий рейтинг Elo",
