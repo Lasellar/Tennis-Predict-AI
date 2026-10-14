@@ -436,18 +436,37 @@ private fun PredictorScreen() {
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
-                Text(predictionSource, style = MaterialTheme.typography.bodySmall)
-                Text(prediction.playerA)
                 Text(
-                    TennisPredictor.formatPercent(prediction.probabilityA),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
+                    predictionSource,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(prediction.playerB)
-                Text(
-                    TennisPredictor.formatPercent(prediction.probabilityB),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(prediction.playerA, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            TennisPredictor.formatPercent(prediction.probabilityA),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(prediction.playerB, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            TennisPredictor.formatPercent(prediction.probabilityB),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                LinearProgressIndicator(
+                    progress = prediction.probabilityA.toFloat(),
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Text("Разница рейтингов: ${prediction.ratingDifference.toInt()} Elo")
             }
