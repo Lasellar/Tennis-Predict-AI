@@ -506,12 +506,10 @@ private fun PredictorScreen() {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    "Исторические данные",
+                    "Импорт результатов",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
-                Text("Матчей на устройстве: ${storedMatches.size}")
-                Text("Игроков в рейтинге: ${ratingSnapshot.overall.size}")
                 Text(
                     "Выбери сразу один или несколько CSV-файлов. История сохраняется локально и не отправляется на сервер.",
                     style = MaterialTheme.typography.bodyMedium
@@ -521,7 +519,7 @@ private fun PredictorScreen() {
                     enabled = !isImporting,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (isImporting) "Импортируем…" else "Выбрать несколько CSV")
+                    Text(if (isImporting) "Импортируем…" else "Выбрать CSV-файлы")
                 }
                 if (isImporting) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -570,7 +568,7 @@ private fun PredictorScreen() {
             ) {
                 ScreenHeading(
                     title = "Рейтинги игроков",
-                    subtitle = "Сравни общий Elo и форму рейтинга на разных покрытиях."
+                    subtitle = "Сравни общий Elo и рейтинги игроков на разных покрытиях."
                 )
                 RankingCard(
                     title = "Общий рейтинг Elo",
