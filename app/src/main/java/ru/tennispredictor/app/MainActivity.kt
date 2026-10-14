@@ -175,6 +175,12 @@ private fun PredictorScreen() {
         )
         Text("Прогнозы на основе Elo и локальной истории матчей")
 
+        RealMatchPredictionCard(
+            matches = storedMatches,
+            database = database,
+            model = trainedModel
+        )
+
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
