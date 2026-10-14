@@ -203,6 +203,10 @@ private fun PredictorScreen() {
                         }
                     }
                 }
+                Text(
+                    "Покрытие применяется к признакам модели. При выборе «Все покрытия» для будущего матча используется хард.",
+                    style = MaterialTheme.typography.bodySmall
+                )
 
                 OutlinedButton(
                     onClick = {
