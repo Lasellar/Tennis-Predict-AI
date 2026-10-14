@@ -173,7 +173,7 @@ object RealMatchPredictor {
         val playerMatches = history.filter { stored ->
             val match = stored.record
             (normalizeName(match.playerA) == key || normalizeName(match.playerB) == key) &&
-                isValidRecord(match)
+                isValidRecord(stored)
         }
         val ordered = if (playerMatches.all { it.record.date.isNotBlank() }) {
             playerMatches.sortedWith(compareBy<StoredMatch> { it.record.date }.thenBy { it.id })
