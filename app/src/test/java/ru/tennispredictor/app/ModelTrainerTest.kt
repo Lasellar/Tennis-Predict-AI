@@ -64,6 +64,22 @@ class ModelTrainerTest {
     }
 
     @Test
+    fun reversingPlayersProducesComplementaryFutureProbabilities() {
+        val history = syntheticHistory()
+        val model = ModelTrainer.trainAndEvaluate(history).model.copy(recommendedForPrediction = true)
+
+        val probabilityAB = ModelTrainer.predictFutureProbability(
+            history, "A", "B", Surface.HARD, 1600.0, 1500.0, model
+        )
+        val probabilityBA = ModelTrainer.predictFutureProbability(
+            history, "B", "A", Surface.HARD, 1500.0, 1600.0, model
+        )
+
+        assertTrue(probabilityAB != null && probabilityBA != null)
+        assertEquals(1.0, probabilityAB!! + probabilityBA!!, 1e-9)
+    }
+
+    @Test
     fun sameDayMatchesDoNotUpdateFeaturesForEachOther() {
         val date = "2024-01-10"
         val history = listOf(
