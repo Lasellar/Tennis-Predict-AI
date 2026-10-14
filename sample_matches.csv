@@ -1,6 +1,6 @@
-player_a,player_b,winner,surface
-Player A,Player B,Player A,hard
-Player A,Player C,Player C,clay
-Player B,Player C,Player B,grass
-Player A,Player B,Player A,indoor
-Player C,Player A,Player A,hard
+date,player_a,player_b,winner,surface
+2024-01-05,Player A,Player B,Player A,hard
+2024-01-06,Player A,Player C,Player C,clay
+2024-01-07,Player B,Player C,Player B,grass
+2024-01-08,Player A,Player B,Player A,indoor
+2024-01-09,Player C,Player A,Player A,hard
