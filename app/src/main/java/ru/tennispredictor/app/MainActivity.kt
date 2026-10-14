@@ -239,6 +239,36 @@ private fun PredictorScreen() {
                     title = "Прогноз матча",
                     subtitle = "Оцени шансы игроков с учётом истории, покрытия и формы."
                 )
+                if (storedMatches.isEmpty()) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Начни с истории матчей",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                "Пока нет импортированных результатов, оценка будет опираться на базовый Elo. CSV-архив поможет учитывать форму игроков и их рейтинги на покрытиях.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            OutlinedButton(
+                                onClick = { selectedTab = 1 },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Перейти к импорту")
+                            }
+                        }
+                    }
+                }
                 RealMatchPredictionCard(
                     matches = storedMatches,
                     database = database,
