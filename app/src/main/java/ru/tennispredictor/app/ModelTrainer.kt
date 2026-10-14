@@ -372,9 +372,9 @@ object ModelTrainer {
             }
 
             val record = stored.record
-            val rawA = record.playerA.trim().replace(Regex("\\\\s+"), " ")
-            val rawB = record.playerB.trim().replace(Regex("\\\\s+"), " ")
-            val rawWinner = record.winner.trim().replace(Regex("\\\\s+"), " ")
+            val rawA = record.playerA.trim().replace(Regex("\\s+"), " ")
+            val rawB = record.playerB.trim().replace(Regex("\\s+"), " ")
+            val rawWinner = record.winner.trim().replace(Regex("\\s+"), " ")
             val keyA = normalizeName(rawA)
             val keyB = normalizeName(rawB)
             val winnerKey = normalizeName(rawWinner)
@@ -572,7 +572,7 @@ object ModelTrainer {
         runCatching { LocalDate.parse(value.trim()) }.getOrNull()
 
     private fun normalizeName(value: String): String =
-        value.trim().replace(Regex("\\\\s+"), " ").lowercase(Locale.ROOT)
+        value.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
 
     private data class DatedMatch(
         val id: Long,
