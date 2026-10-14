@@ -19,7 +19,7 @@ The real-match forecast card is integrated into the 0.4.5 application without re
 - Save forecasts on-device, enter outcomes manually, and automatically reconcile a saved forecast after CSV import only when date, player pair and surface match.
 - Review hit rate, Log Loss and Brier Score for resolved forecasts.
 
-The SQLite database migrates from schema version 1 to 2 by creating the forecast table; imported match history is retained.
+The SQLite database migrates from schema version 1 to 3 without deleting imported match history. It also detects and migrates forecasts and settled outcomes from the alternate 0.4.0 schema.
 
 ## Historical-data stage
 
