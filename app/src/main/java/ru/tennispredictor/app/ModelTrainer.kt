@@ -353,8 +353,13 @@ object ModelTrainer {
         val orientedFeatures = if (userAIsCanonicalA) canonicalFeatures else {
             DoubleArray(canonicalFeatures.size) { -canonicalFeatures[it] }
         }
-        // Preserve user-supplied/current Elo ratings as the model's overall-Elo input.
-        orientedFeatures[0] = (eloA - eloB) / 400.0
+        // Feature 0 must use the same canonical A/B orientation as the trained weights.
+        // Otherwise swapping the entered players would silently break symmetry.
+        orientedFeatures[0] = if (userAIsCanonicalA) {
+            (eloA - eloB) / 400.0
+        } else {
+            (eloB - eloA) / 400.0
+        }
         return model.predictProbability(orientedFeatures).coerceIn(0.001, 0.999)
     }
 
