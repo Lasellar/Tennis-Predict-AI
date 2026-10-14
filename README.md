@@ -54,6 +54,19 @@ The APK is created at app/build/outputs/apk/debug/app-debug.apk.
 
 A successful GitHub Actions run publishes an artifact named tennis-predictor-debug-apk.
 
+## Model-training stage
+
+The app includes an on-device logistic-regression workflow and compares it with an Elo baseline:
+
+- It builds pre-match features from overall Elo difference, surface Elo difference, recent form, total experience and experience on the selected surface.
+- Player order is canonicalized by name before training. This prevents winner-first ATP/WTA archive columns from making every label look like a win for player A.
+- Rows are sorted by date and split by whole dates: earlier dates are used for training, and later dates are held out for evaluation.
+- All matches on the same date receive features before that date's results update Elo, form or experience. Undated or invalid records are excluded from this temporal evaluation and counted in the report.
+- Log Loss, Brier Score and accuracy are shown for Elo and logistic regression on the same later-date holdout. Lower Log Loss and Brier Score indicate better probabilistic predictions.
+- After evaluation, a final logistic model is refitted on all eligible dated matches and its coefficients are stored locally on the device for the next development stage.
+
+The model currently uses match outcomes and rating history only. It does not yet use rankings, tournament categories, surface-specific serve/return statistics, fatigue or injuries. A better score on one historical holdout does not guarantee better future results.
+
 ## Current limitations
 
 The importer reads CSV data locally and supports common ATP/WTA winner/loser archive schemas. It does not yet ingest live match feeds, player identifiers, tournament importance, match format, injury status or serve/return statistics. Elo ratings therefore remain a baseline feature for later prediction-model improvements.
