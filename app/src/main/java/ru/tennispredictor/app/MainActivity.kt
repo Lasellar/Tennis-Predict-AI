@@ -48,6 +48,7 @@ private data class ImportUiResult(
     val fileErrors: List<String>
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PredictorScreen() {
     val context = LocalContext.current
