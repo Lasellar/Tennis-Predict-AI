@@ -40,10 +40,12 @@ class MatchDatabase(context: Context) :
         )
         db.execSQL("CREATE INDEX idx_matches_date ON $TABLE_MATCHES(match_date)")
         db.execSQL("CREATE INDEX idx_matches_surface ON $TABLE_MATCHES(surface)")
+        createPredictionsTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Keep existing history intact. Add explicit migrations here if the schema changes.
+        // Keep imported history intact while adding the Stage 3 prediction ledger.
+        if (oldVersion < 2) createPredictionsTable(db)
     }
 
     fun loadMatches(): List<StoredMatch> {
@@ -110,6 +112,155 @@ class MatchDatabase(context: Context) :
         return DatabaseImportSummary(inserted = inserted, duplicates = duplicates)
     }
 
+
+    fun savePrediction(prediction: SavedPrediction): Long {
+        val values = ContentValues().apply {
+            put("created_at", prediction.createdAt)
+            put("match_date", prediction.matchDate)
+            put("player_a", prediction.playerA)
+            put("player_b", prediction.playerB)
+            put("surface", prediction.surface.name)
+            put("probability_a", prediction.probabilityA)
+            put("overall_elo_a", prediction.overallEloA)
+            put("overall_elo_b", prediction.overallEloB)
+            put("surface_elo_a", prediction.surfaceEloA)
+            put("surface_elo_b", prediction.surfaceEloB)
+            put("form_a", prediction.formA)
+            put("form_b", prediction.formB)
+            put("total_matches_a", prediction.totalMatchesA)
+            put("total_matches_b", prediction.totalMatchesB)
+            put("surface_matches_a", prediction.surfaceMatchesA)
+            put("surface_matches_b", prediction.surfaceMatchesB)
+            put("source", prediction.source)
+            put("uncertainty_label", prediction.uncertaintyLabel)
+            put("uncertainty_reason", prediction.uncertaintyReason)
+            put("probability_low", prediction.probabilityLow)
+            put("probability_high", prediction.probabilityHigh)
+            prediction.resultWinner?.let { put("result_winner", it) }
+        }
+        return writableDatabase.insert(TABLE_PREDICTIONS, null, values)
+    }
+
+    fun loadSavedPredictions(): List<SavedPrediction> {
+        val result = mutableListOf<SavedPrediction>()
+        readableDatabase.query(
+            TABLE_PREDICTIONS,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "created_at DESC, id DESC"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val rawSurface = cursor.getString(cursor.getColumnIndexOrThrow("surface"))
+                val surface = runCatching { Surface.valueOf(rawSurface) }.getOrDefault(Surface.OTHER)
+                result += SavedPrediction(
+                    id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                    createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                    matchDate = cursor.getString(cursor.getColumnIndexOrThrow("match_date")),
+                    playerA = cursor.getString(cursor.getColumnIndexOrThrow("player_a")),
+                    playerB = cursor.getString(cursor.getColumnIndexOrThrow("player_b")),
+                    surface = surface,
+                    probabilityA = cursor.getDouble(cursor.getColumnIndexOrThrow("probability_a")),
+                    overallEloA = cursor.getDouble(cursor.getColumnIndexOrThrow("overall_elo_a")),
+                    overallEloB = cursor.getDouble(cursor.getColumnIndexOrThrow("overall_elo_b")),
+                    surfaceEloA = cursor.getDouble(cursor.getColumnIndexOrThrow("surface_elo_a")),
+                    surfaceEloB = cursor.getDouble(cursor.getColumnIndexOrThrow("surface_elo_b")),
+                    formA = cursor.getString(cursor.getColumnIndexOrThrow("form_a")),
+                    formB = cursor.getString(cursor.getColumnIndexOrThrow("form_b")),
+                    totalMatchesA = cursor.getInt(cursor.getColumnIndexOrThrow("total_matches_a")),
+                    totalMatchesB = cursor.getInt(cursor.getColumnIndexOrThrow("total_matches_b")),
+                    surfaceMatchesA = cursor.getInt(cursor.getColumnIndexOrThrow("surface_matches_a")),
+                    surfaceMatchesB = cursor.getInt(cursor.getColumnIndexOrThrow("surface_matches_b")),
+                    source = cursor.getString(cursor.getColumnIndexOrThrow("source")),
+                    uncertaintyLabel = cursor.getString(cursor.getColumnIndexOrThrow("uncertainty_label")),
+                    uncertaintyReason = cursor.getString(cursor.getColumnIndexOrThrow("uncertainty_reason")),
+                    probabilityLow = cursor.getDouble(cursor.getColumnIndexOrThrow("probability_low")),
+                    probabilityHigh = cursor.getDouble(cursor.getColumnIndexOrThrow("probability_high")),
+                    resultWinner = cursor.getString(cursor.getColumnIndexOrThrow("result_winner"))
+                        ?.takeIf { it.isNotBlank() }
+                )
+            }
+        }
+        return result
+    }
+
+    fun resolvePredictionResult(predictionId: Long, winner: String): Boolean {
+        val cleanWinner = winner.trim()
+        if (cleanWinner.isBlank()) return false
+        val values = ContentValues().apply { put("result_winner", cleanWinner) }
+        return writableDatabase.update(
+            TABLE_PREDICTIONS,
+            values,
+            "id = ? AND (result_winner IS NULL OR result_winner = '')",
+            arrayOf(predictionId.toString())
+        ) > 0
+    }
+
+    /**
+     * Resolve saved forecasts only when an imported result matches the planned date,
+     * both players (in either order), and the selected surface. No fuzzy name matching.
+     */
+    fun reconcileSavedPredictions(history: List<StoredMatch>): Int {
+        var resolved = 0
+        val pending = loadSavedPredictions().filter { it.resultWinner.isNullOrBlank() }
+        pending.forEach { prediction ->
+            val match = history.firstOrNull { stored ->
+                normalizeMatchDate(stored.record.date) == prediction.matchDate &&
+                    stored.record.surface == prediction.surface &&
+                    setOf(normalize(stored.record.playerA), normalize(stored.record.playerB)) ==
+                    setOf(normalize(prediction.playerA), normalize(prediction.playerB)) &&
+                    stored.record.winner.isNotBlank()
+            }
+            if (match != null && resolvePredictionResult(prediction.id, match.record.winner)) resolved++
+        }
+        return resolved
+    }
+
+    private fun createPredictionsTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_PREDICTIONS (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at INTEGER NOT NULL,
+                match_date TEXT NOT NULL,
+                player_a TEXT NOT NULL,
+                player_b TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                probability_a REAL NOT NULL,
+                overall_elo_a REAL NOT NULL,
+                overall_elo_b REAL NOT NULL,
+                surface_elo_a REAL NOT NULL,
+                surface_elo_b REAL NOT NULL,
+                form_a TEXT NOT NULL,
+                form_b TEXT NOT NULL,
+                total_matches_a INTEGER NOT NULL,
+                total_matches_b INTEGER NOT NULL,
+                surface_matches_a INTEGER NOT NULL,
+                surface_matches_b INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                uncertainty_label TEXT NOT NULL,
+                uncertainty_reason TEXT NOT NULL,
+                probability_low REAL NOT NULL,
+                probability_high REAL NOT NULL,
+                result_winner TEXT
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_predictions_match_date ON $TABLE_PREDICTIONS(match_date)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_predictions_result ON $TABLE_PREDICTIONS(result_winner)")
+    }
+
+    private fun normalizeMatchDate(value: String): String {
+        val trimmed = value.trim()
+        return if (trimmed.matches(Regex("\\d{8}"))) {
+            "${trimmed.substring(0, 4)}-${trimmed.substring(4, 6)}-${trimmed.substring(6, 8)}"
+        } else {
+            trimmed.take(10)
+        }
+    }
+
     private fun matchSignature(match: MatchRecord): String {
         val players = listOf(normalize(match.playerA), normalize(match.playerB)).sorted()
         val canonical = listOf(
@@ -128,7 +279,8 @@ class MatchDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "tennis_predictor_history.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
         const val TABLE_MATCHES = "matches"
+        const val TABLE_PREDICTIONS = "saved_predictions"
     }
 }
