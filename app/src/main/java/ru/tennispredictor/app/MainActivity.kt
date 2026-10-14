@@ -39,7 +39,9 @@ private data class ImportUiResult(
     val duplicates: Int,
     val invalidRows: Int,
     val parseIssues: List<String>,
-    val allMatches: List<StoredMatch>
+    val automaticallyVerified: Int,
+    val allMatches: List<StoredMatch>,
+    val allPredictions: List<StoredPrediction>
 )
 
 @Composable
@@ -58,6 +60,7 @@ private fun PredictorScreen() {
     var error by remember { mutableStateOf<String?>(null) }
 
     var storedMatches by remember { mutableStateOf<List<StoredMatch>>(emptyList()) }
+    var storedPredictions by remember { mutableStateOf<List<StoredPrediction>>(emptyList()) }
     var isImporting by remember { mutableStateOf(false) }
     var importMessage by remember { mutableStateOf<String?>(null) }
     var importMessageIsError by remember { mutableStateOf(false) }
@@ -76,6 +79,7 @@ private fun PredictorScreen() {
 
     LaunchedEffect(database) {
         storedMatches = withContext(Dispatchers.IO) { database.loadMatches() }
+        storedPredictions = withContext(Dispatchers.IO) { database.loadPredictions() }
         trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
     }
 
@@ -97,18 +101,24 @@ private fun PredictorScreen() {
                             "В CSV не найдено корректных матчей. Проверь заголовки и содержимое файла."
                         }
                         val saved = database.insertMatches(parsed.records)
+                        val allMatches = database.loadMatches()
+                        val automaticallyVerified = database.settlePredictionsFromResults(allMatches)
                         ImportUiResult(
                             inserted = saved.inserted,
                             duplicates = saved.duplicates,
                             invalidRows = parsed.invalidRows,
                             parseIssues = parsed.issues,
-                            allMatches = database.loadMatches()
+                            automaticallyVerified = automaticallyVerified,
+                            allMatches = allMatches,
+                            allPredictions = database.loadPredictions()
                         )
                     }
                     storedMatches = result.allMatches
+                    storedPredictions = result.allPredictions
                     importMessageIsError = false
                     importMessage = buildString {
                         append("Импорт завершён. Добавлено: ${result.inserted}; повторов пропущено: ${result.duplicates}.")
+                        if (result.automaticallyVerified > 0) append(" Автоматически проверено прогнозов: ${result.automaticallyVerified}.")
                         if (result.invalidRows > 0) append(" Ошибочных строк: ${result.invalidRows}.")
                         if (result.parseIssues.isNotEmpty()) {
                             append(" Пример: ${result.parseIssues.first()}.")
@@ -136,13 +146,25 @@ private fun PredictorScreen() {
         )
         Text("Прогнозы на основе Elo и локальной истории матчей")
 
+        RealMatchPredictionCard(
+            history = storedMatches,
+            trainedModel = trainedModel,
+            savedPredictions = storedPredictions,
+            database = database,
+            onPredictionsChanged = {
+                scope.launch {
+                    storedPredictions = withContext(Dispatchers.IO) { database.loadPredictions() }
+                }
+            }
+        )
+
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "Участники матча",
+                    "Быстрый расчёт Elo (ручной режим)",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
