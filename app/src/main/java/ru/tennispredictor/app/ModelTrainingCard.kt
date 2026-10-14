@@ -23,8 +23,15 @@ fun ModelTrainingCard(matches: List<StoredMatch>) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("Этап 2 — обучение модели") }
+    var report by remember { mutableStateOf<ModelComparisonReport?>(null) }
     Card { Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(message)
+        report?.let { r ->
+            Text("Обучение: ${r.trainStartDate} — ${r.trainEndDate}; проверка: ${r.testStartDate} — ${r.testEndDate}")
+            Text("Log Loss: Elo ${r.eloMetrics.logLoss}; регрессия ${r.logisticMetrics.logLoss}")
+            Text("Brier Score: Elo ${r.eloMetrics.brierScore}; регрессия ${r.logisticMetrics.brierScore}")
+            Text("Точность: Elo ${r.eloMetrics.accuracy}; регрессия ${r.logisticMetrics.accuracy}")
+        }
         Button(onClick = {
             val snapshot = matches.toList()
             busy = true
@@ -33,6 +40,7 @@ fun ModelTrainingCard(matches: List<StoredMatch>) {
                     val result = withContext(Dispatchers.Default) { ModelTrainer.trainAndEvaluate(snapshot) }
                     withContext(Dispatchers.IO) { ModelStore(context).save(result.model) }
                     message = "Обучение завершено: ${result.testMatches} тестовых матчей"
+                    report = result
                 } catch (e: Exception) { message = e.message ?: "Ошибка обучения" }
                 finally { busy = false }
             }
