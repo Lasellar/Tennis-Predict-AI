@@ -309,199 +309,199 @@ private fun PredictorScreen() {
                 }
                 if (manualExpanded) {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-            Column(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    "Участники матча",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                PlayerNameField(
-                    value = playerA,
-                    onValueChange = { playerA = it },
-                    label = "Игрок A",
-                    playerNames = playerNames
-                )
-                OutlinedTextField(
-                    value = ratingA,
-                    onValueChange = { ratingA = it },
-                    label = { Text("Рейтинг Elo игрока A") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                PlayerNameField(
-                    value = playerB,
-                    onValueChange = { playerB = it },
-                    label = "Игрок B",
-                    playerNames = playerNames
-                )
-                OutlinedTextField(
-                    value = ratingB,
-                    onValueChange = { ratingB = it },
-                    label = { Text("Рейтинг Elo игрока B") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Box {
-                    OutlinedButton(onClick = { surfaceMenuExpanded = true }) {
-                        Text("Рейтинги / покрытие: ${selectedRatingSurface?.displayName ?: "Все покрытия"}")
-                    }
-                    DropdownMenu(
-                        expanded = surfaceMenuExpanded,
-                        onDismissRequest = { surfaceMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Все покрытия") },
-                            onClick = {
-                                selectedRatingSurface = null
-                                surfaceMenuExpanded = false
-                            }
-                        )
-                        listOf(Surface.HARD, Surface.CLAY, Surface.GRASS).forEach { surface ->
-                            DropdownMenuItem(
-                                text = { Text(surface.displayName) },
-                                onClick = {
-                                    selectedRatingSurface = surface
-                                    surfaceMenuExpanded = false
-                                }
+                        Column(
+                            Modifier.fillMaxWidth().padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Участники матча",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
                             )
-                        }
-                    }
-                }
-                Text(
-                    "Покрытие применяется к признакам модели. При выборе «Все покрытия» для будущего матча используется хард.",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                            PlayerNameField(
+                                value = playerA,
+                                onValueChange = { playerA = it },
+                                label = "Игрок A",
+                                playerNames = playerNames
+                            )
+                            OutlinedTextField(
+                                value = ratingA,
+                                onValueChange = { ratingA = it },
+                                label = { Text("Рейтинг Elo игрока A") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            PlayerNameField(
+                                value = playerB,
+                                onValueChange = { playerB = it },
+                                label = "Игрок B",
+                                playerNames = playerNames
+                            )
+                            OutlinedTextField(
+                                value = ratingB,
+                                onValueChange = { ratingB = it },
+                                label = { Text("Рейтинг Elo игрока B") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
 
-                OutlinedButton(
-                    onClick = {
-                        val rows = ratingSnapshot.playersFor(selectedRatingSurface)
-                        val foundA = rows.firstOrNull { it.name.equals(playerA.trim(), ignoreCase = true) }
-                        val foundB = rows.firstOrNull { it.name.equals(playerB.trim(), ignoreCase = true) }
-                        ratingA = (foundA?.rating?.roundToInt() ?: 1500).toString()
-                        ratingB = (foundB?.rating?.roundToInt() ?: 1500).toString()
-                        historicalMessage = buildString {
-                            append("Подставлены исторические Elo: ")
-                            append("${foundA?.rating?.roundToInt() ?: 1500} и ${foundB?.rating?.roundToInt() ?: 1500}.")
-                            if (foundA == null || foundB == null) {
-                                append(" Для игрока без записей используется базовый рейтинг 1500.")
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Подставить Elo из истории")
-                }
-                historicalMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-
-                Button(
-                    onClick = {
-                        val a = ratingA.toDoubleOrNull()
-                        val b = ratingB.toDoubleOrNull()
-                        error = when {
-                            playerA.isBlank() || playerB.isBlank() -> "Укажи имена обоих игроков."
-                            playerA.trim().equals(playerB.trim(), true) -> "Игроки должны различаться."
-                            a == null || b == null || a !in 500.0..3000.0 || b !in 500.0..3000.0 ->
-                                "Рейтинг Elo должен быть числом от 500 до 3000."
-                            else -> null
-                        }
-                        if (error == null) {
-                            val enteredA = a!!
-                            val enteredB = b!!
-                            val matchA = playerA.trim()
-                            val matchB = playerB.trim()
-                            val matchSurface = selectedRatingSurface ?: Surface.HARD
-                            val modelSnapshot = trainedModel
-                            val historySnapshot = storedMatches.toList()
-                            scope.launch {
-                                val learnedProbability = withContext(Dispatchers.Default) {
-                                    modelSnapshot?.let {
-                                        ModelTrainer.predictFutureProbability(
-                                            history = historySnapshot,
-                                            playerA = matchA,
-                                            playerB = matchB,
-                                            surface = matchSurface,
-                                            eloA = enteredA,
-                                            eloB = enteredB,
-                                            model = it
+                            Box {
+                                OutlinedButton(onClick = { surfaceMenuExpanded = true }) {
+                                    Text("Рейтинги / покрытие: ${selectedRatingSurface?.displayName ?: "Все покрытия"}")
+                                }
+                                DropdownMenu(
+                                    expanded = surfaceMenuExpanded,
+                                    onDismissRequest = { surfaceMenuExpanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Все покрытия") },
+                                        onClick = {
+                                            selectedRatingSurface = null
+                                            surfaceMenuExpanded = false
+                                        }
+                                    )
+                                    listOf(Surface.HARD, Surface.CLAY, Surface.GRASS).forEach { surface ->
+                                        DropdownMenuItem(
+                                            text = { Text(surface.displayName) },
+                                            onClick = {
+                                                selectedRatingSurface = surface
+                                                surfaceMenuExpanded = false
+                                            }
                                         )
                                     }
                                 }
-                                if (learnedProbability != null) {
-                                    prediction = Prediction(
-                                        playerA = matchA,
-                                        playerB = matchB,
-                                        probabilityA = learnedProbability,
-                                        probabilityB = 1.0 - learnedProbability,
-                                        ratingDifference = enteredA - enteredB
-                                    )
-                                    predictionSource = "Источник: логистическая регрессия (${modelSnapshot?.profileName ?: "модель"})"
-                                } else {
-                                    prediction = TennisPredictor.predict(matchA, matchB, enteredA, enteredB)
-                                    predictionSource = when {
-                                        modelSnapshot == null -> "Источник: Elo — обученной модели пока нет"
-                                        !modelSnapshot.recommendedForPrediction -> "Источник: Elo — модель не улучшила качество на временной проверке"
-                                        else -> "Источник: Elo — история изменилась после обучения; переобучи модель"
+                            }
+                            Text(
+                                "Покрытие применяется к признакам модели. При выборе «Все покрытия» для будущего матча используется хард.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            OutlinedButton(
+                                onClick = {
+                                    val rows = ratingSnapshot.playersFor(selectedRatingSurface)
+                                    val foundA = rows.firstOrNull { it.name.equals(playerA.trim(), ignoreCase = true) }
+                                    val foundB = rows.firstOrNull { it.name.equals(playerB.trim(), ignoreCase = true) }
+                                    ratingA = (foundA?.rating?.roundToInt() ?: 1500).toString()
+                                    ratingB = (foundB?.rating?.roundToInt() ?: 1500).toString()
+                                    historicalMessage = buildString {
+                                        append("Подставлены исторические Elo: ")
+                                        append("${foundA?.rating?.roundToInt() ?: 1500} и ${foundB?.rating?.roundToInt() ?: 1500}.")
+                                        if (foundA == null || foundB == null) {
+                                            append(" Для игрока без записей используется базовый рейтинг 1500.")
+                                        }
                                     }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Подставить Elo из истории")
+                            }
+                            historicalMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+                            Button(
+                                onClick = {
+                                    val a = ratingA.toDoubleOrNull()
+                                    val b = ratingB.toDoubleOrNull()
+                                    error = when {
+                                        playerA.isBlank() || playerB.isBlank() -> "Укажи имена обоих игроков."
+                                        playerA.trim().equals(playerB.trim(), true) -> "Игроки должны различаться."
+                                        a == null || b == null || a !in 500.0..3000.0 || b !in 500.0..3000.0 ->
+                                            "Рейтинг Elo должен быть числом от 500 до 3000."
+                                        else -> null
+                                    }
+                                    if (error == null) {
+                                        val enteredA = a!!
+                                        val enteredB = b!!
+                                        val matchA = playerA.trim()
+                                        val matchB = playerB.trim()
+                                        val matchSurface = selectedRatingSurface ?: Surface.HARD
+                                        val modelSnapshot = trainedModel
+                                        val historySnapshot = storedMatches.toList()
+                                        scope.launch {
+                                            val learnedProbability = withContext(Dispatchers.Default) {
+                                                modelSnapshot?.let {
+                                                    ModelTrainer.predictFutureProbability(
+                                                        history = historySnapshot,
+                                                        playerA = matchA,
+                                                        playerB = matchB,
+                                                        surface = matchSurface,
+                                                        eloA = enteredA,
+                                                        eloB = enteredB,
+                                                        model = it
+                                                    )
+                                                }
+                                            }
+                                            if (learnedProbability != null) {
+                                                prediction = Prediction(
+                                                    playerA = matchA,
+                                                    playerB = matchB,
+                                                    probabilityA = learnedProbability,
+                                                    probabilityB = 1.0 - learnedProbability,
+                                                    ratingDifference = enteredA - enteredB
+                                                )
+                                                predictionSource = "Источник: логистическая регрессия (${modelSnapshot?.profileName ?: "модель"})"
+                                            } else {
+                                                prediction = TennisPredictor.predict(matchA, matchB, enteredA, enteredB)
+                                                predictionSource = when {
+                                                    modelSnapshot == null -> "Источник: Elo — обученной модели пока нет"
+                                                    !modelSnapshot.recommendedForPrediction -> "Источник: Elo — модель не улучшила качество на временной проверке"
+                                                    else -> "Источник: Elo — история изменилась после обучения; переобучи модель"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Рассчитать прогноз") }
+                            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        }
+                    }
+                    Card {
+                        Column(
+                            Modifier.fillMaxWidth().padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Вероятности победы",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                predictionSource,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text(prediction.playerA, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        TennisPredictor.formatPercent(prediction.probabilityA),
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text(prediction.playerB, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        TennisPredictor.formatPercent(prediction.probabilityB),
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
+                            LinearProgressIndicator(
+                                progress = prediction.probabilityA.toFloat(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text("Разница рейтингов: ${prediction.ratingDifference.toInt()} Elo")
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Рассчитать прогноз") }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        }
-                    Card {
-            Column(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    "Вероятности победы",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    predictionSource,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(prediction.playerA, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            TennisPredictor.formatPercent(prediction.probabilityA),
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(prediction.playerB, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            TennisPredictor.formatPercent(prediction.probabilityB),
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                LinearProgressIndicator(
-                    progress = prediction.probabilityA.toFloat(),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text("Разница рейтингов: ${prediction.ratingDifference.toInt()} Elo")
-            }
-        }
                 }
             }
 
@@ -532,42 +532,42 @@ private fun PredictorScreen() {
                     )
                 }
                 Card {
-            Column(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    "Импорт результатов",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Выбери сразу один или несколько CSV-файлов. История сохраняется локально и не отправляется на сервер.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Button(
-                    onClick = { csvPicker.launch(arrayOf("*/*")) },
-                    enabled = !isImporting,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isImporting) "Импортируем…" else "Выбрать CSV-файлы")
+                    Column(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            "Импорт результатов",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Выбери сразу один или несколько CSV-файлов. История сохраняется локально и не отправляется на сервер.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Button(
+                            onClick = { csvPicker.launch(arrayOf("*/*")) },
+                            enabled = !isImporting,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (isImporting) "Импортируем…" else "Выбрать CSV-файлы")
+                        }
+                        if (isImporting) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                        importMessage?.let {
+                            Text(
+                                it,
+                                color = if (importMessageIsError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            "Поддерживаются player_a, player_b, winner, surface, date; а также ATP/WTA-архивы с winner_name, loser_name, surface и tourney_date. Даты и поверхность можно не указывать.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
-                if (isImporting) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-                importMessage?.let {
-                    Text(
-                        it,
-                        color = if (importMessageIsError) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.primary
-                    )
-                }
-                Text(
-                    "Поддерживаются player_a, player_b, winner, surface, date; а также ATP/WTA-архивы с winner_name, loser_name, surface и tourney_date. Даты и поверхность можно не указывать.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                 ) {
