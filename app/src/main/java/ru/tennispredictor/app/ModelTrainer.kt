@@ -350,17 +350,17 @@ object ModelTrainer {
 
         val canonicalFeatures = futureSample.features.copyOf()
         val userAIsCanonicalA = normalizeName(playerA) <= normalizeName(playerB)
-        val orientedFeatures = if (userAIsCanonicalA) canonicalFeatures else {
-            DoubleArray(canonicalFeatures.size) { -canonicalFeatures[it] }
-        }
-        // Feature 0 must use the same canonical A/B orientation as the trained weights.
-        // Otherwise swapping the entered players would silently break symmetry.
-        orientedFeatures[0] = if (userAIsCanonicalA) {
+        // The model always predicts the lexicographically canonical first player.
+        // Inject manual/current Elo with the same canonical orientation, then complement
+        // the probability when the user's A player is the canonical second player.
+        canonicalFeatures[0] = if (userAIsCanonicalA) {
             (eloA - eloB) / 400.0
         } else {
             (eloB - eloA) / 400.0
         }
-        return model.predictProbability(orientedFeatures).coerceIn(0.001, 0.999)
+        val canonicalProbability = model.predictProbability(canonicalFeatures)
+        val probabilityForUserA = if (userAIsCanonicalA) canonicalProbability else 1.0 - canonicalProbability
+        return probabilityForUserA.coerceIn(0.001, 0.999)
     }
 
     /** Feature snapshots are calculated strictly before the outcome on that date. */
