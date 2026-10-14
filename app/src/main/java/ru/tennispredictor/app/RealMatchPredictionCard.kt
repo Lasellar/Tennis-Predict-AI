@@ -84,7 +84,7 @@ fun RealMatchPredictionCard(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    "Этап 3 · Прогноз реального матча",
+                    "Прогноз реального матча",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -248,28 +248,61 @@ fun RealMatchPredictionCard(
         }
 
         forecast?.let { item ->
-            Card {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Column(
                     Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
                         "Прогноз сохранён · ${item.matchDate}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(item.source, style = MaterialTheme.typography.bodySmall)
-                    Text(item.playerA, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        TennisPredictor.formatPercent(item.probabilityA),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(item.playerB, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        TennisPredictor.formatPercent(item.probabilityB),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
+                    Text(item.source, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                item.playerA,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2
+                            )
+                            Text(
+                                TennisPredictor.formatPercent(item.probabilityA),
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                item.playerB,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2
+                            )
+                            Text(
+                                TennisPredictor.formatPercent(item.probabilityB),
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    LinearProgressIndicator(
+                        progress = item.probabilityA.toFloat(),
+                        modifier = Modifier.fillMaxWidth()
                     )
                     HorizontalDivider()
                     Text(
