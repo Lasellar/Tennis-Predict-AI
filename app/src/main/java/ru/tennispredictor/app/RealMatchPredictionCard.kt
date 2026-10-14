@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -327,9 +328,15 @@ private fun PlayerSearchField(
     var expanded by remember { mutableStateOf(false) }
     val suggestions = remember(value, players) {
         if (value.isBlank()) emptyList()
-        else players.filter { it.contains(value.trim(), ignoreCase = true) }
+        else players.asSequence()
+            .filter { it.contains(value.trim(), ignoreCase = true) }
             .filterNot { it.equals(value.trim(), ignoreCase = true) }
+            .sortedWith(
+                compareBy<String> { !it.startsWith(value.trim(), ignoreCase = true) }
+                    .thenBy { it.lowercase(Locale.ROOT) }
+            )
             .take(8)
+            .toList()
     }
     Box {
         androidx.compose.material3.OutlinedTextField(
@@ -345,6 +352,7 @@ private fun PlayerSearchField(
         DropdownMenu(
             expanded = expanded && suggestions.isNotEmpty(),
             onDismissRequest = { expanded = false },
+            properties = PopupProperties(focusable = false),
             modifier = Modifier.heightIn(max = 280.dp)
         ) {
             suggestions.forEach { suggestion ->
