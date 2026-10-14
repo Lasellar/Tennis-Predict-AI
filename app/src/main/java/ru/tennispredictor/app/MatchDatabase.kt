@@ -47,14 +47,13 @@ class MatchDatabase(context: Context) :
         // Version 2 adds the current prediction ledger. Version 3 also handles users
         // who previously installed the alternate 0.4.0 Stage 3 build, whose table was
         // named "predictions" and used a different set of columns.
-        if (oldVersion < 2) createPredictionsTable(db)
-        if (oldVersion < 3) {
-            if (!tableExists(db, TABLE_PREDICTIONS)) {
-                createPredictionsTable(db)
-            }
-            if (tableExists(db, LEGACY_TABLE_PREDICTIONS)) {
-                migrateLegacyPredictions(db)
-            }
+        if (oldVersion < 2 && !tableExists(db, TABLE_PREDICTIONS)) {
+            createPredictionsTable(db)
+        }
+        if (oldVersion < 3 && !tableExists(db, TABLE_PREDICTIONS)) {
+            val hasLegacyPredictions = tableExists(db, LEGACY_TABLE_PREDICTIONS)
+            createPredictionsTable(db)
+            if (hasLegacyPredictions) migrateLegacyPredictions(db)
         }
     }
 
@@ -284,8 +283,6 @@ class MatchDatabase(context: Context) :
      * snapshots or the newer uncertainty metadata.
      */
     private fun migrateLegacyPredictions(db: SQLiteDatabase) {
-        if (tableExists(db, TABLE_PREDICTIONS)) return
-        createPredictionsTable(db)
         db.execSQL(
             """
             INSERT INTO $TABLE_PREDICTIONS (
