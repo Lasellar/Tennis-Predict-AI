@@ -355,6 +355,8 @@ private fun PredictorScreen() {
             }
         }
 
+        RealMatchPredictionCard(matches = storedMatches, database = database, model = trainedModel)
+
         ModelTrainingCard(matches = storedMatches, onModelTrained = { trainedModel = it })
 
         RankingCard(
