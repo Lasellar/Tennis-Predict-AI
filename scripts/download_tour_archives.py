@@ -164,7 +164,12 @@ def current_season_supplement(
     earliest_date = latest_primary_date or f"{year}-01-01"
     records: list[Match] = []
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
-        reader = csv.DictReader(stream)
+        # Valuebetennis publishes its open-data files as semicolon-delimited CSV.
+        # Detect the delimiter from the header so comma-delimited mirrors also work.
+        header = stream.readline()
+        delimiter = ";" if header.count(";") > header.count(",") else ","
+        stream.seek(0)
+        reader = csv.DictReader(stream, delimiter=delimiter)
         required = {
             "date", "categorie", "genre", "surface",
             "joueur1", "joueur1_id", "joueur2", "joueur2_id", "vainqueur_id",
