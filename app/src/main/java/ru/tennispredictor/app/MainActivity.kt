@@ -309,6 +309,8 @@ private fun PredictorScreen() {
             }
         }
 
+        ModelTrainingCard(matches = storedMatches)
+
         RankingCard(
             title = "Общий рейтинг Elo",
             subtitle = "Все покрытия · ${storedMatches.size} матчей",
