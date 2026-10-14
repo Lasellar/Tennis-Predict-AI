@@ -69,7 +69,7 @@ internal data class ModelFeaturePreparation(
  */
 object ModelTrainer {
     const val MINIMUM_DATED_MATCHES = 20
-    private const val HOLDOUT_FRACTION = 0.20
+    private const val HOLDOUT_FRACTION = 0.25
     private const val K_FACTOR = 32.0
     private const val RECENT_MATCH_WINDOW = 10
     private const val MODEL_ITERATIONS = 250
