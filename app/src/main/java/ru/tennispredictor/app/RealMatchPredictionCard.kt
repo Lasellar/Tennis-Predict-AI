@@ -291,7 +291,6 @@ fun RealMatchPredictionCard(
                                 try {
                                     withContext(Dispatchers.IO) {
                                         database.savePrediction(draft)
-                                        database.settlePredictionsFromResults(history)
                                     }
                                     onPredictionsChanged()
                                     message = "Прогноз сохранён на устройстве."
