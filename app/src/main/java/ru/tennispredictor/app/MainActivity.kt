@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,7 +40,10 @@ private data class ImportUiResult(
     val duplicates: Int,
     val invalidRows: Int,
     val parseIssues: List<String>,
-    val allMatches: List<StoredMatch>
+    val allMatches: List<StoredMatch>,
+    val selectedFiles: Int,
+    val filesWithMatches: Int,
+    val fileErrors: List<String>
 )
 
 @Composable
@@ -69,6 +73,9 @@ private fun PredictorScreen() {
     var predictionSource by remember { mutableStateOf("Источник: базовая модель Elo") }
 
     val ratingSnapshot = remember(storedMatches) { RatingCalculator.calculate(storedMatches) }
+    val playerNames = remember(ratingSnapshot.overall) {
+        ratingSnapshot.overall.map { it.name }.distinct().sortedBy { it.lowercase(Locale.ROOT) }
+    }
 
     DisposableEffect(database) {
         onDispose { database.close() }
@@ -80,44 +87,76 @@ private fun PredictorScreen() {
     }
 
     val csvPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
             scope.launch {
                 isImporting = true
                 importMessage = null
                 try {
                     val result = withContext(Dispatchers.IO) {
-                        val csv = requireNotNull(context.contentResolver.openInputStream(uri)) {
-                            "Не удалось открыть выбранный файл."
-                        }.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        val combinedRecords = mutableListOf<MatchRecord>()
+                        val parseIssues = mutableListOf<String>()
+                        val fileErrors = mutableListOf<String>()
+                        var invalidRows = 0
+                        var filesWithMatches = 0
 
-                        val parsed = MatchCsvImporter.parse(csv)
-                        require(parsed.records.isNotEmpty()) {
-                            "В CSV не найдено корректных матчей. Проверь заголовки и содержимое файла."
+                        uris.forEachIndexed { index, uri ->
+                            try {
+                                val csv = requireNotNull(context.contentResolver.openInputStream(uri)) {
+                                    "Не удалось открыть файл ${index + 1}."
+                                }.bufferedReader(Charsets.UTF_8).use { it.readText() }
+
+                                val parsed = MatchCsvImporter.parse(csv)
+                                invalidRows += parsed.invalidRows
+                                if (parseIssues.size < 5) {
+                                    parseIssues += parsed.issues.take(5 - parseIssues.size)
+                                }
+                                if (parsed.records.isEmpty()) {
+                                    fileErrors += "Файл ${index + 1}: корректных матчей не найдено."
+                                } else {
+                                    combinedRecords += parsed.records
+                                    filesWithMatches++
+                                }
+                            } catch (exception: Exception) {
+                                fileErrors += "Файл ${index + 1}: ${exception.message ?: "ошибка чтения"}."
+                            }
                         }
-                        val saved = database.insertMatches(parsed.records)
+
+                        require(combinedRecords.isNotEmpty()) {
+                            "Не удалось найти корректные матчи ни в одном из выбранных CSV."
+                        }
+
+                        val saved = database.insertMatches(combinedRecords)
                         ImportUiResult(
                             inserted = saved.inserted,
                             duplicates = saved.duplicates,
-                            invalidRows = parsed.invalidRows,
-                            parseIssues = parsed.issues,
-                            allMatches = database.loadMatches()
+                            invalidRows = invalidRows,
+                            parseIssues = parseIssues,
+                            allMatches = database.loadMatches(),
+                            selectedFiles = uris.size,
+                            filesWithMatches = filesWithMatches,
+                            fileErrors = fileErrors
                         )
                     }
                     storedMatches = result.allMatches
                     importMessageIsError = false
                     importMessage = buildString {
-                        append("Импорт завершён. Добавлено: ${result.inserted}; повторов пропущено: ${result.duplicates}.")
+                        append("Обработано CSV: ${result.filesWithMatches}/${result.selectedFiles}. ")
+                        append("Добавлено матчей: ${result.inserted}; повторов пропущено: ${result.duplicates}.")
                         if (result.invalidRows > 0) append(" Ошибочных строк: ${result.invalidRows}.")
                         if (result.parseIssues.isNotEmpty()) {
-                            append(" Пример: ${result.parseIssues.first()}.")
+                            append(" Пример ошибки строки: ${result.parseIssues.first()}.")
+                        }
+                        if (result.fileErrors.isNotEmpty()) {
+                            append(" Проблемы с файлами: ${result.fileErrors.take(3).joinToString(" ")}")
+                            if (result.fileErrors.size > 3) append(" И ещё: ${result.fileErrors.size - 3}.")
                         }
                     }
                     historicalMessage = null
                 } catch (exception: Exception) {
                     importMessageIsError = true
-                    importMessage = exception.message ?: "Не удалось импортировать CSV-файл."
+                    importMessage = exception.message ?: "Не удалось импортировать выбранные CSV-файлы."
                 } finally {
                     isImporting = false
                 }
@@ -146,12 +185,11 @@ private fun PredictorScreen() {
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
-                OutlinedTextField(
+                PlayerNameField(
                     value = playerA,
                     onValueChange = { playerA = it },
-                    label = { Text("Игрок A") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    label = "Игрок A",
+                    playerNames = playerNames
                 )
                 OutlinedTextField(
                     value = ratingA,
@@ -161,12 +199,11 @@ private fun PredictorScreen() {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
+                PlayerNameField(
                     value = playerB,
                     onValueChange = { playerB = it },
-                    label = { Text("Игрок B") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    label = "Игрок B",
+                    playerNames = playerNames
                 )
                 OutlinedTextField(
                     value = ratingB,
@@ -328,7 +365,7 @@ private fun PredictorScreen() {
                 Text("Матчей на устройстве: ${storedMatches.size}")
                 Text("Игроков в рейтинге: ${ratingSnapshot.overall.size}")
                 Text(
-                    "Импортируй CSV из памяти телефона. История сохраняется локально и не отправляется на сервер.",
+                    "Выбери сразу один или несколько CSV-файлов. История сохраняется локально и не отправляется на сервер.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Button(
@@ -336,7 +373,7 @@ private fun PredictorScreen() {
                     enabled = !isImporting,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (isImporting) "Импортируем…" else "Импортировать матчи из CSV")
+                    Text(if (isImporting) "Импортируем…" else "Выбрать несколько CSV")
                 }
                 if (isImporting) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -386,6 +423,61 @@ private fun PredictorScreen() {
                     "Elo — базовая модель, а не гарантия результата и не рекомендация по ставкам. " +
                         "Исторические рейтинги пересчитываются по датам матчей, если даты присутствуют во всём наборе. " +
                         "Для игрока без истории используется стартовый Elo 1500."
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun PlayerNameField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    playerNames: List<String>
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val query = value.trim()
+    val suggestions = remember(query, playerNames) {
+        if (query.length < 2 || playerNames.any { it.equals(query, ignoreCase = true) }) {
+            emptyList()
+        } else {
+            playerNames.asSequence()
+                .filter { it.contains(query, ignoreCase = true) }
+                .sortedWith(
+                    compareBy<String> { !it.startsWith(query, ignoreCase = true) }
+                        .thenBy { it.lowercase(Locale.ROOT) }
+                )
+                .take(500)
+                .toList()
+        }
+    }
+
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = it.trim().length >= 2
+            },
+            label = { Text(label) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        DropdownMenu(
+            expanded = expanded && suggestions.isNotEmpty(),
+            onDismissRequest = { expanded = false },
+            properties = PopupProperties(focusable = false),
+            modifier = Modifier.heightIn(max = 280.dp)
+        ) {
+            suggestions.forEach { name ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        onValueChange(name)
+                        expanded = false
+                    }
                 )
             }
         }
