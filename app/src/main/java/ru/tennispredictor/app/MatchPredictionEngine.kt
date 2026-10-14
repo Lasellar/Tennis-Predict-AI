@@ -3,7 +3,6 @@ package ru.tennispredictor.app
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.ln
 
 data class PlayerEvidence(
     val displayName: String,
@@ -137,7 +136,10 @@ object MatchPredictionEngine {
         history.sortedBy { it.id }.forEach { stored ->
             listOf(stored.record.playerA, stored.record.playerB).forEach { raw ->
                 val display = collapseWhitespace(raw)
-                if (display.isNotBlank()) names.putIfAbsent(normalizeName(display), display)
+                if (display.isNotBlank()) {
+                    val key = normalizeName(display)
+                    if (!names.containsKey(key)) names[key] = display
+                }
             }
         }
         return names.values.sortedWith(String.CASE_INSENSITIVE_ORDER)
@@ -233,7 +235,7 @@ object MatchPredictionEngine {
         val surfaceWeight = 0.35 * commonSurfaceHistory.toDouble() / (commonSurfaceHistory + 8.0)
         val commonRecentHistory = minOf(evidenceA.recentMatches, evidenceB.recentMatches)
         val recentWeight = (commonRecentHistory.toDouble() / MAX_RECENT).coerceIn(0.0, 1.0)
-        val recentFormDifference = effectiveForm(evidenceA, surface) - effectiveForm(evidenceB, surface)
+        val recentFormDifference = effectiveForm(evidenceA) - effectiveForm(evidenceB)
         val adjustedDifference = overallDifference * (1.0 - surfaceWeight) +
             surfaceDifference * surfaceWeight +
             100.0 * recentFormDifference * recentWeight
@@ -338,7 +340,7 @@ object MatchPredictionEngine {
         )
     }
 
-    private fun effectiveForm(evidence: PlayerEvidence, surface: Surface): Double {
+    private fun effectiveForm(evidence: PlayerEvidence): Double {
         if (evidence.recentMatches == 0) return 0.5
         val overall = evidence.recentWinRate
         return if (evidence.surfaceRecentMatches >= 3) {
