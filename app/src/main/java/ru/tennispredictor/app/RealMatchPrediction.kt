@@ -63,7 +63,7 @@ object RealMatchPredictor {
             .filter { normalizeName(it).contains(needle) }
             .sortedWith(
                 compareBy<String> { if (normalizeName(it).startsWith(needle)) 0 else 1 }
-                    .thenBy(String.CASE_INSENSITIVE_ORDER)
+                    .thenBy { normalizeName(it) }
             )
             .take(limit.coerceAtLeast(1))
             .toList()
