@@ -20,7 +20,7 @@ BASE_URL = (
     "https://raw.githubusercontent.com/farhadGithub/tennis-atp-data/"
     "main/data/raw/atp_matches_{year}.csv"
 )
-USER_AGENT = "Tennis-Predict-AI historical evaluation downloader"
+USER_AGENT = "Tennis-Predict-AI historical evaluation downloader"  # archive workflow
 
 
 def download_year(year: int, raw_dir: Path) -> Path:
