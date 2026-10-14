@@ -54,6 +54,18 @@ The APK is created at app/build/outputs/apk/debug/app-debug.apk.
 
 A successful GitHub Actions run publishes an artifact named tennis-predictor-debug-apk.
 
+## Real-match forecasting (Stage 3)
+
+The main screen now includes a real-match prediction workflow:
+
+- Player search suggestions are built from names already present in the phone's local match database. Names can also be entered manually for players not found in the archive.
+- The selected court surface is applied to the Elo baseline. The app shows each player's most recent results overall and on that surface; the selected logistic-regression model also uses recent-form features when temporal validation has shown that the model is useful.
+- Every estimate includes both win probabilities, an approximate 80% probability range, recent-form context and the amount of historical evidence. The range is a heuristic based on rating uncertainty and match counts, not a statistically calibrated confidence interval.
+- Forecasts are saved on-device with their probabilities, source, court surface, player form and optional target date. The user can record the actual winner afterwards; the app calculates per-forecast Log Loss and Brier Score and shows aggregate accuracy for settled forecasts.
+- When a target match date is supplied, importing history automatically verifies a saved forecast only when the date, both players and surface match exactly. Forecasts without a date can be settled manually.
+
+No live scores, injuries or external player feeds are requested; the estimate uses only the imported archive and the model trained on the device.
+
 ## Model-training and automatic selection
 
 The app trains logistic regression locally and now selects models using a time-aware validation process:
