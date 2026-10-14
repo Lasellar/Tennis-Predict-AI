@@ -54,18 +54,29 @@ The APK is created at app/build/outputs/apk/debug/app-debug.apk.
 
 A successful GitHub Actions run publishes an artifact named tennis-predictor-debug-apk.
 
-## Model-training stage
+## Model-training and automatic selection
 
-The app includes an on-device logistic-regression workflow and compares it with an Elo baseline:
+The app trains logistic regression locally and now selects models using a time-aware validation process:
 
-- It builds pre-match features from overall Elo difference, surface Elo difference, recent form, total experience and experience on the selected surface.
-- Player order is canonicalized by name before training. This prevents winner-first ATP/WTA archive columns from making every label look like a win for player A.
-- Rows are sorted by date and split by whole dates: earlier dates are used for training, and later dates are held out for evaluation.
-- All matches on the same date receive features before that date's results update Elo, form or experience. Undated or invalid records are excluded from this temporal evaluation and counted in the report.
-- Log Loss, Brier Score and accuracy are shown for Elo and logistic regression on the same later-date holdout. Lower Log Loss and Brier Score indicate better probabilistic predictions.
-- After evaluation, a final logistic model is refitted on all eligible dated matches and its coefficients are stored locally on the device for the next development stage.
+- It compares three feature profiles: overall Elo, overall plus surface Elo, and all five features (overall Elo, surface Elo, recent form, total experience, and surface experience).
+- Each profile is tested with two optimization presets, for six candidate configurations total.
+- Three consecutive walk-forward intervals are used for model selection. Dates are split as complete date batches; no match outcome from a date is allowed to change another match's pre-match features for that same date.
+- Candidate models are ranked by average validation Log Loss, with Brier Score as a tie-breaker. The latest 15% of unique dates are kept as an independent final holdout and are not used to select the candidate.
+- The app only routes predictions through logistic regression when its average validation Log Loss improves on Elo by at least 0.0001. Otherwise it automatically continues to use Elo. This is intentional: a more complex model must demonstrate that it improves the historical probability estimates.
+- A selected model stores its feature profile, coefficients, hyperparameters, training date, sample count, and selection status locally. After importing more matches, prediction falls back to Elo until the model is trained again on the new history.
+- The main prediction screen uses the selected model's probability when it is recommended and its training history is current. Otherwise it shows the Elo probability and the reason the model was not applied.
 
-The model currently uses match outcomes and rating history only. It does not yet use rankings, tournament categories, surface-specific serve/return statistics, fatigue or injuries. A better score on one historical holdout does not guarantee better future results.
+## Building the ATP benchmark archive
+
+A reproducible download utility creates a combined CSV that can be imported directly from the Android app:
+
+    python3 scripts/download_atp_archive.py --start 2010 --end 2024
+
+The command downloads yearly ATP main-tour singles CSVs into data/benchmark/raw/ and writes data/benchmark/atp_2010_2024.csv. The generated dataset is not committed to this repository.
+
+The benchmark used 42,571 ATP matches from 2010–2024. On three earlier validation intervals, Elo averaged Log Loss 0.62278 and Brier Score 0.21668; the best of the six logistic candidates averaged 0.62451 and 0.21762. The final holdout (5,775 matches from 2023-02-02 through 2024-12-18) gave Elo Log Loss 0.63391 / Brier 0.22187 and logistic regression 0.63402 / 0.22199. The automatic selector therefore keeps Elo for this dataset. Full metrics, tested configurations, intervals, and source attribution are documented in benchmarks/atp_archive_2010_2024.md.
+
+The third-party ATP archive is attributed to Jeff Sackmann / Tennis Abstract, using a public mirror maintained by farhadGithub. Its stated license is CC BY-NC-SA 4.0, which permits non-commercial use only unless additional permission is obtained. Do not bundle or redistribute the source archive for commercial use without checking the rights first.
 
 ## Current limitations
 
