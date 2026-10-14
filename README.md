@@ -8,6 +8,19 @@ Android MVP for estimating tennis match win probabilities from Elo ratings.
 - CSV import accepts multiple files in one picker session and imports them together, skipping duplicates across the selected files.
 - The current-season ATP and WTA CSV archive builder now targets results through the build date (UTC), including a licensed current-season supplement where available.
 
+## Stage 3 — real-match forecasting
+
+The real-match forecast card is integrated into the 0.4.5 application without replacing the existing manual Elo form, scrollable suggestions, multi-file CSV importer, or ATP/WTA archive workflow.
+
+- Choose two players, the planned match date, and court surface.
+- Calculate a probability from overall Elo, surface Elo and recent form; use the locally trained logistic model only when its validation status and date coverage are safe.
+- Results on or after the planned match date are excluded from forecast feature history to reduce future-result leakage.
+- Show each player's recent-form evidence, uncertainty rating and an Elo-sensitivity range. The range is a heuristic, not a calibrated statistical confidence interval.
+- Save forecasts on-device, enter outcomes manually, and automatically reconcile a saved forecast after CSV import only when date, player pair and surface match.
+- Review hit rate, Log Loss and Brier Score for resolved forecasts.
+
+The SQLite database migrates from schema version 1 to 2 by creating the forecast table; imported match history is retained.
+
 ## Historical-data stage
 
 The Android app now supports:
@@ -93,4 +106,4 @@ The third-party ATP archive is attributed to Jeff Sackmann / Tennis Abstract, us
 
 ## Current limitations
 
-The importer reads CSV data locally and supports common ATP/WTA winner/loser archive schemas. It does not yet ingest live match feeds, player identifiers, tournament importance, match format, injury status or serve/return statistics. Elo ratings therefore remain a baseline feature for later prediction-model improvements.
+The app does not yet ingest live match feeds, stable tour player identifiers, tournament importance, match format, injury status or serve/return statistics. Real-match forecasts are based on the quality and recency of the CSV history available on the device; they do not guarantee outcomes or imply a betting edge.
