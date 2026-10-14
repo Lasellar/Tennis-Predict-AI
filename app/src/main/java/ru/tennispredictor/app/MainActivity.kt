@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
@@ -17,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,8 +30,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { PredictorScreen() }
+            TennisPredictTheme {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { PredictorScreen() }
             }
         }
     }
@@ -164,24 +166,118 @@ private fun PredictorScreen() {
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Text(
-            "TENNIS PREDICTOR AI",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-        Text("Прогнозы на основе Elo и локальной истории матчей")
 
-        RealMatchPredictionCard(
-            matches = storedMatches,
-            database = database,
-            model = trainedModel
-        )
+    var selectedTab by remember { mutableStateOf(0) }
+    var manualExpanded by remember { mutableStateOf(false) }
+    val navigationTabs = listOf("Прогноз", "Данные", "Рейтинги", "Модель")
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                "TENNIS PREDICT",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(
+                                "АНАЛИТИКА ТЕННИСНЫХ МАТЧЕЙ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f),
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                "${storedMatches.size}",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.secondary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "МАТЧЕЙ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                            )
+                        }
+                    }
+                }
+                PrimaryTabRow(selectedTabIndex = selectedTab) {
+                    navigationTabs.forEachIndexed { index, label ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelLarge) }
+                        )
+                    }
+                }
+            }
+        }
+    ) { contentPadding ->
+        when (selectedTab) {
+            0 -> Column(
+                Modifier.fillMaxSize()
+                    .padding(contentPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ScreenHeading(
+                    title = "Прогноз матча",
+                    subtitle = "Оцени шансы игроков с учётом истории, покрытия и формы."
+                )
+                RealMatchPredictionCard(
+                    matches = storedMatches,
+                    database = database,
+                    model = trainedModel
+                )
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable { manualExpanded = !manualExpanded }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                "Ручной прогноз по Elo",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Для быстрой оценки по известным рейтингам",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            if (manualExpanded) "Свернуть" else "Настроить",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                if (manualExpanded) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -330,8 +426,7 @@ private fun PredictorScreen() {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         }
-
-        Card {
+                    Card {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -357,8 +452,36 @@ private fun PredictorScreen() {
                 Text("Разница рейтингов: ${prediction.ratingDifference.toInt()} Elo")
             }
         }
+                }
+            }
 
-        Card {
+            1 -> Column(
+                Modifier.fillMaxSize()
+                    .padding(contentPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ScreenHeading(
+                    title = "История матчей",
+                    subtitle = "Импортируй результаты один раз — рейтинги и прогнозы обновятся автоматически."
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SummaryTile(
+                        label = "Матчей на устройстве",
+                        value = storedMatches.size.toString(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    SummaryTile(
+                        label = "Игроков в рейтинге",
+                        value = ratingSnapshot.overall.size.toString(),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Card {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -397,40 +520,141 @@ private fun PredictorScreen() {
                 )
             }
         }
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            "Данные остаются на устройстве",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            "История матчей хранится локально и не отправляется на сервер. Повторно импортированные матчи пропускаются.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
 
-        ModelTrainingCard(matches = storedMatches, onModelTrained = { trainedModel = it })
-
-        RankingCard(
-            title = "Общий рейтинг Elo",
-            subtitle = "Все покрытия · ${storedMatches.size} матчей",
-            players = ratingSnapshot.overall
-        )
-        RankingCard(
-            title = "Рейтинг на харде",
-            subtitle = "${storedMatches.count { it.record.surface == Surface.HARD }} матчей",
-            players = ratingSnapshot.hard
-        )
-        RankingCard(
-            title = "Рейтинг на грунте",
-            subtitle = "${storedMatches.count { it.record.surface == Surface.CLAY }} матчей",
-            players = ratingSnapshot.clay
-        )
-        RankingCard(
-            title = "Рейтинг на траве",
-            subtitle = "${storedMatches.count { it.record.surface == Surface.GRASS }} матчей",
-            players = ratingSnapshot.grass
-        )
-
-        Card {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("О модели", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Elo — базовая модель, а не гарантия результата и не рекомендация по ставкам. " +
-                        "Исторические рейтинги пересчитываются по датам матчей, если даты присутствуют во всём наборе. " +
-                        "Для игрока без истории используется стартовый Elo 1500."
+            2 -> Column(
+                Modifier.fillMaxSize()
+                    .padding(contentPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ScreenHeading(
+                    title = "Рейтинги игроков",
+                    subtitle = "Сравни общий Elo и форму рейтинга на разных покрытиях."
+                )
+                RankingCard(
+                    title = "Общий рейтинг Elo",
+                    subtitle = "Все покрытия · ${storedMatches.size} матчей",
+                    players = ratingSnapshot.overall
+                )
+                RankingCard(
+                    title = "Рейтинг на харде",
+                    subtitle = "${storedMatches.count { it.record.surface == Surface.HARD }} матчей",
+                    players = ratingSnapshot.hard
+                )
+                RankingCard(
+                    title = "Рейтинг на грунте",
+                    subtitle = "${storedMatches.count { it.record.surface == Surface.CLAY }} матчей",
+                    players = ratingSnapshot.clay
+                )
+                RankingCard(
+                    title = "Рейтинг на траве",
+                    subtitle = "${storedMatches.count { it.record.surface == Surface.GRASS }} матчей",
+                    players = ratingSnapshot.grass
                 )
             }
+
+            else -> Column(
+                Modifier.fillMaxSize()
+                    .padding(contentPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ScreenHeading(
+                    title = "Обучение модели",
+                    subtitle = "Сравни алгоритмы на прошлых датах и используй модель только при подтверждённом улучшении."
+                )
+                ModelTrainingCard(matches = storedMatches, onModelTrained = { trainedModel = it })
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "Как читать прогноз",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Elo — базовая модель, а не гарантия результата и не рекомендация по ставкам. " +
+                                "Исторические рейтинги пересчитываются по датам матчей, если даты присутствуют во всём наборе. " +
+                                "Для игрока без истории используется стартовый Elo 1500.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun ScreenHeading(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SummaryTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }
