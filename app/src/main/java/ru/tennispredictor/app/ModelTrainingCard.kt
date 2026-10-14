@@ -100,7 +100,7 @@ fun ModelTrainingCard(
                 r.candidateResults.forEachIndexed { index, candidate ->
                     Text(
                         "${index + 1}. ${candidate.name}" +
-                            if (candidate.name == r.selectedModelName) " · выбран" else "",
+                            if (index == 0) " · лучший по CV" else "",
                         fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal
                     )
                     Text(
