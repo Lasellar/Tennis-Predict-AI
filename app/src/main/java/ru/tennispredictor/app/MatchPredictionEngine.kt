@@ -185,8 +185,8 @@ object MatchPredictionEngine {
             if (a.isBlank() || b.isBlank() || a == b || (winner != a && winner != b)) {
                 null
             } else {
-                displayNames.putIfAbsent(a, collapseWhitespace(record.playerA))
-                displayNames.putIfAbsent(b, collapseWhitespace(record.playerB))
+                if (!displayNames.containsKey(a)) displayNames[a] = collapseWhitespace(record.playerA)
+                if (!displayNames.containsKey(b)) displayNames[b] = collapseWhitespace(record.playerB)
                 Triple(stored, a, b)
             }
         }
