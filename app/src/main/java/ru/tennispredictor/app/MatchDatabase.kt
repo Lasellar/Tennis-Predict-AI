@@ -275,7 +275,7 @@ class MatchDatabase(context: Context) :
         return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 
-    private fun normalize(value: String): String = value.trim().lowercase(Locale.ROOT)
+    private fun normalize(value: String): String = value.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
 
     private companion object {
         const val DATABASE_NAME = "tennis_predictor_history.db"
