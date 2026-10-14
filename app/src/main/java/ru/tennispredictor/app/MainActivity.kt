@@ -134,7 +134,9 @@ private fun PredictorScreen() {
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold
         )
-        Text("Прогнозы на основе Elo и локальной истории матчей")
+        Text("Локальная история, прогнозы и проверка точности на устройстве")
+
+        RealMatchPredictionCard(matches = storedMatches, database = database, model = trainedModel)
 
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(
@@ -354,8 +356,6 @@ private fun PredictorScreen() {
                 )
             }
         }
-
-        RealMatchPredictionCard(matches = storedMatches, database = database, model = trainedModel)
 
         ModelTrainingCard(matches = storedMatches, onModelTrained = { trainedModel = it })
 
