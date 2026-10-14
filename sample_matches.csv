@@ -1,0 +1,6 @@
+player_a,player_b,winner,surface
+Player A,Player B,Player A,hard
+Player A,Player C,Player C,clay
+Player B,Player C,Player B,grass
+Player A,Player B,Player A,indoor
+Player C,Player A,Player A,hard
