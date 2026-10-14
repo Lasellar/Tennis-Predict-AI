@@ -2,6 +2,7 @@ package ru.tennispredictor.app
 
 import java.time.LocalDate
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,8 +21,46 @@ class ModelTrainerTest {
         assertTrue(report.logisticMetrics.logLoss.isFinite())
         assertTrue(report.eloMetrics.brierScore in 0.0..1.0)
         assertTrue(report.logisticMetrics.brierScore in 0.0..1.0)
-        assertEquals(ModelTrainer.featureNames.size + 1, report.model.weights.size)
+        assertEquals(report.model.featureIndices.size + 1, report.model.weights.size)
         assertTrue(report.model.weights.all { it.isFinite() })
+        assertEquals(6, report.candidateResults.size)
+        assertEquals(3, report.candidateResults.first().folds.size)
+        assertTrue(report.candidateResults.zipWithNext().all { (a, b) ->
+            a.meanLogLoss <= b.meanLogLoss + 1e-12
+        })
+    }
+
+    @Test
+    fun trainedModelPredictsFutureMatchAndRejectsStaleHistory() {
+        val history = syntheticHistory()
+        val model = ModelTrainer.trainAndEvaluate(history).model.copy(recommendedForPrediction = true)
+
+        val probability = ModelTrainer.predictFutureProbability(
+            history = history,
+            playerA = "A",
+            playerB = "B",
+            surface = Surface.HARD,
+            eloA = 1600.0,
+            eloB = 1500.0,
+            model = model
+        )
+        assertTrue(probability != null && probability in 0.001..0.999)
+
+        val newerResult = StoredMatch(
+            99_999,
+            MatchRecord("A", "B", "A", Surface.HARD, date = "2025-01-01")
+        )
+        assertNull(
+            ModelTrainer.predictFutureProbability(
+                history + newerResult,
+                "A",
+                "B",
+                Surface.HARD,
+                1600.0,
+                1500.0,
+                model
+            )
+        )
     }
 
     @Test
