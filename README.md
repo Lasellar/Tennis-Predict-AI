@@ -78,6 +78,20 @@ The benchmark used 42,571 ATP matches from 2010–2024. On three earlier validat
 
 The third-party ATP archive is attributed to Jeff Sackmann / Tennis Abstract, using a public mirror maintained by farhadGithub. Its stated license is CC BY-NC-SA 4.0, which permits non-commercial use only unless additional permission is obtained. Do not bundle or redistribute the source archive for commercial use without checking the rights first.
 
+## Real-match forecasting and prediction tracking
+
+The Stage 3 screen adds a local player search and a saved-forecast ledger:
+
+- Player names are suggested from the imported on-device match history. Players without local history can still be entered, but their starting rating is 1500 and forecast uncertainty will be higher.
+- Before calculating, choose the planned match date and surface. Results dated on the forecast date or later are excluded from the feature history, reducing future-result leakage.
+- The forecast uses current overall Elo, Elo for the selected surface, recent results (up to the last 10 matches), and surface-specific recent form. A current logistic-regression model is used only when it passed validation, its training history is fully dated, and its data ends before the selected match date; otherwise a transparent Elo / surface / recent-form fallback is used.
+- Each forecast is saved in the local SQLite database with its probabilities, ratings, evidence counts, data source and uncertainty notes. No prediction history is uploaded.
+- Uncertainty is shown as a qualitative level based on history volume, surface sample size and recency. The displayed probability sensitivity range shows how the forecast changes when each player's Elo is shifted by ±100 points; it is not a calibrated statistical confidence interval.
+- After the match, its result can be recorded manually. When new CSV results are imported, a saved prediction is also reconciled automatically when the match date, both players and surface match exactly.
+- For resolved predictions, the app reports hit rate, Log Loss and Brier Score. These metrics evaluate the saved probabilities and do not imply a betting edge.
+
+The local database is upgraded without deleting imported match history.
+
 ## Current limitations
 
 The importer reads CSV data locally and supports common ATP/WTA winner/loser archive schemas. It does not yet ingest live match feeds, player identifiers, tournament importance, match format, injury status or serve/return statistics. Elo ratings therefore remain a baseline feature for later prediction-model improvements.
