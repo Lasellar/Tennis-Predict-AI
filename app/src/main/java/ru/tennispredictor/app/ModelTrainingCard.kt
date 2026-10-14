@@ -1,3 +1,9 @@
 package ru.tennispredictor.app
 
-// UI for the stage-2 model training workflow is added below.
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+
+@Composable
+fun ModelTrainingCard(matches: List<StoredMatch>) {
+    Text("Этап 2 — обучение модели")
+}
