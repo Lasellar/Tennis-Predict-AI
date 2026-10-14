@@ -79,7 +79,18 @@ object RealMatchPredictor {
         require(playerA.isNotBlank() && playerB.isNotBlank()) { "Укажи имена обоих игроков." }
         require(normalizeName(playerA) != normalizeName(playerB)) { "Игроки должны различаться." }
 
-        val snapshot = RatingCalculator.calculate(history)
+        val canonicalNames = playerNames(history).associateBy { normalizeName(it) }
+        val normalizedHistory = history.map { stored ->
+            val record = stored.record
+            stored.copy(
+                record = record.copy(
+                    playerA = canonicalNames[normalizeName(record.playerA)] ?: record.playerA.trim(),
+                    playerB = canonicalNames[normalizeName(record.playerB)] ?: record.playerB.trim(),
+                    winner = canonicalNames[normalizeName(record.winner)] ?: record.winner.trim()
+                )
+            )
+        }
+        val snapshot = RatingCalculator.calculate(normalizedHistory)
         val formA = formFor(history, playerA, surface)
         val formB = formFor(history, playerB, surface)
         val ratingA = ratingFor(snapshot, playerA, surface)
