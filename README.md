@@ -2,6 +2,14 @@
 
 Android MVP for estimating tennis match win probabilities from Elo ratings.
 
+## Version 0.5.0
+
+- Redesigned the Android interface with a pinned header and four clear sections: Forecast, Data, Rankings and Model.
+- Added a calmer tennis-inspired green palette, clearer typography hierarchy, softer card shapes and more consistent spacing.
+- Kept the everyday real-match forecast on the main screen; the manual Elo calculator is now secondary and collapsible.
+- Made forecast probabilities easier to compare with a side-by-side summary and a visual probability bar.
+- Kept match import, local storage, surface-specific Elo rankings, model training and saved forecast evaluation available in their own sections.
+
 ## Version 0.4.5
 
 - Player-name suggestions keep the keyboard open while typing; the suggestion list can be scrolled and selected without reopening the text field.
