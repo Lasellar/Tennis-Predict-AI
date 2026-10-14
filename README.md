@@ -94,4 +94,4 @@ The local database is upgraded without deleting imported match history.
 
 ## Current limitations
 
-The importer reads CSV data locally and supports common ATP/WTA winner/loser archive schemas. It does not yet ingest live match feeds, player identifiers, tournament importance, match format, injury status or serve/return statistics. Elo ratings therefore remain a baseline feature for later prediction-model improvements.
+The importer reads CSV data locally and supports common ATP/WTA winner/loser archive schemas. The app does not yet ingest live match feeds, stable tour player identifiers, tournament importance, match format, injury status or serve/return statistics. Forecast quality therefore depends on the completeness and recency of the imported archive.
