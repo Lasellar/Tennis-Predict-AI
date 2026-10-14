@@ -40,9 +40,9 @@ class RealMatchPredictionTest {
         val result = RealMatchPredictor.assess(history, "A", "B", Surface.HARD, model = null)
 
         assertEquals(3, result.formA.totalMatches)
-        assertEquals(2, result.formA.recentOverallCount)
-        assertEquals(1, result.formA.recentOverallWins)
-        assertEquals("В · В", result.formA.recentOverallResults)
+        assertEquals(3, result.formA.recentOverallCount)
+        assertEquals(2, result.formA.recentOverallWins)
+        assertEquals("В · П · В", result.formA.recentOverallResults)
         assertEquals(2, result.formA.surfaceMatches)
         assertEquals(2, result.formA.recentSurfaceWins)
         assertEquals("В · В", result.formA.recentSurfaceResults)
