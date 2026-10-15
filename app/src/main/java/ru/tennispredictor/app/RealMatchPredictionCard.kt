@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun RealMatchPredictionCard(
@@ -256,11 +257,15 @@ fun RealMatchPredictionCard(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        "Прогноз сохранён · ${item.matchDate}",
-                        style = MaterialTheme.typography.titleMedium,
+                        "Прогноз на ${item.matchDate}",
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(item.source, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        item.source,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -269,12 +274,7 @@ fun RealMatchPredictionCard(
                             Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Text(
-                                item.playerA,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 2
-                            )
+                            Text(item.playerA, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2)
                             Text(
                                 TennisPredictor.formatPercent(item.probabilityA),
                                 style = MaterialTheme.typography.headlineSmall,
@@ -286,12 +286,7 @@ fun RealMatchPredictionCard(
                             Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Text(
-                                item.playerB,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 2
-                            )
+                            Text(item.playerB, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2)
                             Text(
                                 TennisPredictor.formatPercent(item.probabilityB),
                                 style = MaterialTheme.typography.headlineSmall,
@@ -305,35 +300,37 @@ fun RealMatchPredictionCard(
                         modifier = Modifier.fillMaxWidth()
                     )
                     HorizontalDivider()
+                    val reliability = reliabilityLabel(item.uncertaintyLabel)
                     Text(
-                        "Неопределённость: ${item.uncertaintyLabel.lowercase(Locale.ROOT)}",
-                        fontWeight = FontWeight.SemiBold
+                        "Надёжность оценки: $reliability",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = when (reliability) {
+                            "Высокая" -> MaterialTheme.colorScheme.primary
+                            "Низкая" -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
                     )
-                    Text(item.uncertaintyReason, style = MaterialTheme.typography.bodySmall)
                     Text(
-                        "Диапазон чувствительности вероятности A: " +
+                        "Почему: ${item.uncertaintyReason}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Диапазон при изменении Elo обоих игроков на ±100: " +
                             "${TennisPredictor.formatPercent(item.probabilityLow)}–${TennisPredictor.formatPercent(item.probabilityHigh)}",
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        "Диапазон рассчитан при изменении Elo каждого игрока на ±100 пунктов; " +
-                            "это не статистический доверительный интервал.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    HorizontalDivider()
-                    Text("История до матча", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "${item.playerA}: Elo ${item.playerAEvidence.overallElo.toInt()} · " +
-                            "последние ${item.playerAEvidence.recentFormLabel} · " +
-                            "на покрытии матчей: ${item.playerAEvidence.surfaceMatches}"
-                    )
-                    Text(
-                        "${item.playerB}: Elo ${item.playerBEvidence.overallElo.toInt()} · " +
-                            "последние ${item.playerBEvidence.recentFormLabel} · " +
-                            "на покрытии матчей: ${item.playerBEvidence.surfaceMatches}"
+                        "Это диапазон чувствительности, а не статистический доверительный интервал.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+
+            PlayerFormComparisonCard(item)
+            ForecastExplanationCard(item)
+            HeadToHeadCard(item)
         }
 
         SavedPredictionsCard(
@@ -348,6 +345,344 @@ fun RealMatchPredictionCard(
             }
         )
     }
+}
+
+private fun reliabilityLabel(uncertainty: String): String = when (uncertainty) {
+    "Низкая" -> "Высокая"
+    "Средняя" -> "Средняя"
+    else -> "Низкая"
+}
+
+@Composable
+private fun PlayerFormComparisonCard(item: MatchForecast) {
+    Card {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Форма игроков",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Последние результаты до даты прогноза и статистика на выбранном покрытии.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                PlayerEvidenceCard(
+                    evidence = item.playerAEvidence,
+                    surface = item.surface,
+                    modifier = Modifier.weight(1f)
+                )
+                PlayerEvidenceCard(
+                    evidence = item.playerBEvidence,
+                    surface = item.surface,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerEvidenceCard(
+    evidence: PlayerEvidence,
+    surface: Surface,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                evidence.displayName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2
+            )
+            Text(
+                "${evidence.overallElo.roundToInt()} Elo",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+            Text("Общий рейтинг", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HorizontalDivider()
+            Text("Последние матчи", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            if (evidence.recentMatches > 0) {
+                Text(
+                    "${evidence.recentFormLabel} побед · ${TennisPredictor.formatPercent(evidence.recentWinRate)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                Text("Нет данных", style = MaterialTheme.typography.bodySmall)
+            }
+            Text("На ${surface.displayName.lowercase(Locale.ROOT)}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (evidence.surfaceRecentMatches > 0) {
+                    "${evidence.surfaceRecentWins}/${evidence.surfaceRecentMatches} побед · Elo ${evidence.surfaceElo.roundToInt()}"
+                } else {
+                    "Матчей: ${evidence.surfaceMatches} · Elo ${evidence.surfaceElo.roundToInt()}"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            HorizontalDivider()
+            Text("Всего матчей: ${evidence.totalMatches}", style = MaterialTheme.typography.bodySmall)
+            Text("На покрытии: ${evidence.surfaceMatches}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (evidence.lastMatchDate.isBlank()) {
+                    "Последний матч: нет датированных данных"
+                } else {
+                    val date = displayHistoryDate(evidence.lastMatchDate)
+                    val days = evidence.daysSinceLastMatch
+                    if (days != null) "Последний матч: $date · $days дн. назад" else "Последний матч: $date"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (evidence.usedUndatedMatches > 0) {
+                Text(
+                    "Без даты: ${evidence.usedUndatedMatches}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForecastExplanationCard(item: MatchForecast) {
+    val trainedModelUsed = item.activeFeatureIndices.isNotEmpty()
+    val indices = item.activeFeatureIndices
+    val overallDelta = item.overallRatingDifference.roundToInt()
+    val surfaceDelta = (item.playerAEvidence.surfaceElo - item.playerBEvidence.surfaceElo).roundToInt()
+    val overallAdvantage = when {
+        overallDelta > 0 -> "преимущество ${item.playerA}"
+        overallDelta < 0 -> "преимущество ${item.playerB}"
+        else -> "рейтинги равны"
+    }
+    val surfaceAdvantage = when {
+        surfaceDelta > 0 -> "выше у ${item.playerA}"
+        surfaceDelta < 0 -> "выше у ${item.playerB}"
+        else -> "одинаковый рейтинг"
+    }
+
+    Card {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Text(
+                "Почему получилась такая вероятность",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                if (trainedModelUsed) {
+                    "Использована обученная логистическая регрессия. Ниже — факторы, которые входят в выбранный профиль."
+                } else {
+                    "Использован базовый Elo с поправками на покрытие и недавние результаты. Поправки зависят от объёма доступной истории."
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
+            InsightRow(
+                title = "Общий Elo",
+                value = "${item.playerAEvidence.overallElo.roundToInt()} vs ${item.playerBEvidence.overallElo.roundToInt()}",
+                detail = "Разница ${signedElo(overallDelta)} · $overallAdvantage"
+            )
+
+            if (!trainedModelUsed || 1 in indices) {
+                InsightRow(
+                    title = "Рейтинг на ${item.surface.displayName.lowercase(Locale.ROOT)}",
+                    value = "${item.playerAEvidence.surfaceElo.roundToInt()} vs ${item.playerBEvidence.surfaceElo.roundToInt()}",
+                    detail = "Разница ${signedElo(surfaceDelta)} · $surfaceAdvantage. Матчей на покрытии: ${item.playerAEvidence.surfaceMatches} у A и ${item.playerBEvidence.surfaceMatches} у B."
+                )
+            } else {
+                Text(
+                    "Рейтинг на покрытии не входит в признаки этого профиля модели.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (!trainedModelUsed || 2 in indices) {
+                InsightRow(
+                    title = "Недавняя форма",
+                    value = "${item.playerAEvidence.recentFormLabel} vs ${item.playerBEvidence.recentFormLabel}",
+                    detail = "Побед за последние матчи: ${winRateLabel(item.playerAEvidence)} у A и ${winRateLabel(item.playerBEvidence)} у B."
+                )
+            } else {
+                Text(
+                    "Недавняя форма не входит в признаки этого профиля модели.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (trainedModelUsed && 3 in indices) {
+                InsightRow(
+                    title = "Общий опыт",
+                    value = "${item.playerAEvidence.totalMatches} vs ${item.playerBEvidence.totalMatches} матчей",
+                    detail = "Количество сыгранных матчей входит в модель как отдельный признак."
+                )
+            }
+            if (trainedModelUsed && 4 in indices) {
+                InsightRow(
+                    title = "Опыт на покрытии",
+                    value = "${item.playerAEvidence.surfaceMatches} vs ${item.playerBEvidence.surfaceMatches} матчей",
+                    detail = "Количество матчей на выбранном покрытии входит в модель как отдельный признак."
+                )
+            }
+            if (trainedModelUsed) {
+                Text(
+                    "Признаки активного профиля: " +
+                        indices.map { modelFeatureLabel(it) }.joinToString(", ") + ".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                "Личные встречи показаны отдельно для контекста и напрямую не меняют рассчитанную вероятность.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun InsightRow(title: String, value: String, detail: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(value, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        }
+        Text(
+            detail,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun HeadToHeadCard(item: MatchForecast) {
+    val h2h = item.headToHead
+    Card {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Text(
+                "Личные встречи",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Учтены только матчи из истории до ${item.matchDate}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(item.playerA, style = MaterialTheme.typography.labelMedium, maxLines = 2)
+                    Text(
+                        h2h.winsA.toString(),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text("побед", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(item.playerB, style = MaterialTheme.typography.labelMedium, maxLines = 2)
+                    Text(
+                        h2h.winsB.toString(),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text("побед", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text(
+                "На ${item.surface.displayName.lowercase(Locale.ROOT)}: ${h2h.surfaceWinsA}–${h2h.surfaceWinsB} " +
+                    "(${h2h.surfaceMatches} матчей)",
+                fontWeight = FontWeight.SemiBold
+            )
+            HorizontalDivider()
+            Text("Последние встречи", fontWeight = FontWeight.SemiBold)
+            if (h2h.totalMatches == 0) {
+                Text(
+                    "В импортированной истории личных встреч не найдено.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                h2h.recentMatches.forEach { match ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "${displayHistoryDate(match.date)} · ${match.surface.displayName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text("Победитель: ${match.winner}", fontWeight = FontWeight.Medium)
+                    }
+                }
+                if (h2h.totalMatches > h2h.recentMatches.size) {
+                    Text(
+                        "Показаны последние ${h2h.recentMatches.size} из ${h2h.totalMatches} встреч.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Text(
+                "Личные встречи доступны только в пределах импортированной истории и не гарантируют повторения прежнего результата.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun displayHistoryDate(value: String): String {
+    val raw = value.trim()
+    return when {
+        raw.isBlank() -> "Дата неизвестна"
+        raw.matches(Regex("\\d{8}")) -> "${raw.substring(0, 4)}-${raw.substring(4, 6)}-${raw.substring(6, 8)}"
+        else -> raw.take(10)
+    }
+}
+
+private fun signedElo(value: Int): String = String.format(Locale.ROOT, "%+d", value)
+
+private fun winRateLabel(evidence: PlayerEvidence): String =
+    if (evidence.recentMatches == 0) "нет данных"
+    else TennisPredictor.formatPercent(evidence.recentWinRate)
+
+private fun modelFeatureLabel(index: Int): String = when (index) {
+    0 -> "общий Elo"
+    1 -> "Elo покрытия"
+    2 -> "недавняя форма"
+    3 -> "общий опыт"
+    4 -> "опыт на покрытии"
+    else -> "признак $index"
 }
 
 @Composable
