@@ -143,8 +143,7 @@ object MatchPredictionEngine {
     private data class HistoricalResult(
         val date: String,
         val surface: Surface,
-        val won: Boolean,
-        val opponent: String
+        val won: Boolean
     )
 
     private data class PlayerState(
@@ -203,8 +202,9 @@ object MatchPredictionEngine {
             val date = parseDate(stored.record.date)
             if (date == null) {
                 hasOnlyDatedMatches = false
-            } else if (latestHistoryDate == null || date.isAfter(latestHistoryDate)) {
-                latestHistoryDate = date
+            } else {
+                val currentLatest = latestHistoryDate
+                if (currentLatest == null || date.isAfter(currentLatest)) latestHistoryDate = date
             }
         }
 
@@ -278,14 +278,12 @@ object MatchPredictionEngine {
                     stateB.lastMatchDate = record.date
                 }
 
-                addRecentResult(
-                    stateA,
-                    HistoricalResult(record.date, record.surface, aWon, recordB)
-                )
-                addRecentResult(
-                    stateB,
-                    HistoricalResult(record.date, record.surface, !aWon, recordA)
-                )
+                if (stateA.trackHistory) {
+                    addRecentResult(stateA, HistoricalResult(record.date, record.surface, aWon))
+                }
+                if (stateB.trackHistory) {
+                    addRecentResult(stateB, HistoricalResult(record.date, record.surface, !aWon))
+                }
 
                 val meeting = (recordA == keyA && recordB == keyB) ||
                     (recordA == keyB && recordB == keyA)
