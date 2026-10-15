@@ -711,16 +711,7 @@ private fun PlayerSearchField(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val suggestions = remember(value, players) {
-        if (value.isBlank()) emptyList()
-        else players.asSequence()
-            .filter { it.contains(value.trim(), ignoreCase = true) }
-            .filterNot { it.equals(value.trim(), ignoreCase = true) }
-            .sortedWith(
-                compareBy<String> { !it.startsWith(value.trim(), ignoreCase = true) }
-                    .thenBy { it.lowercase(Locale.ROOT) }
-            )
-            .take(8)
-            .toList()
+        findPlayerSuggestions(players, value, limit = 8)
     }
     Box {
         androidx.compose.material3.OutlinedTextField(
