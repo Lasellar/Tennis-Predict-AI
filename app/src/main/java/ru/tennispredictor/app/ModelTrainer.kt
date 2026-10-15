@@ -15,7 +15,7 @@ data class LogisticRegressionModel(
     val trainingSamples: Int,
     val trainedThroughDate: String,
     val featureVersion: Int = FEATURE_VERSION,
-    val featureIndices: List<Int> = listOf(0, 1, 2, 3, 4),
+    val featureIndices: List<Int> = listOf(0, 1, 2, 3, 4, 5),
     val iterations: Int = 0,
     val learningRate: Double = 0.0,
     val l2Strength: Double = 0.0,
