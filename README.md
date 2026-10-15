@@ -123,7 +123,7 @@ The app trains logistic regression locally and applies conservative, time-aware 
 - A selected model stores its feature profile, coefficients, hyperparameters, feature version, training date, sample count, and selection status locally. Importing more matches invalidates the selection until training is repeated on the new history.
 - If no candidate clears every gate, real-match forecasts use the pure overall-Elo baseline. The UI continues to show recent form, surface results and H2H as evidence, but these factors do not make unvalidated hand-tuned probability adjustments.
 
-The reproducible standard-preset reference replay is documented in `benchmarks/feature_ablation_atp_2010_2024.md`. It tested 42,564 valid dated ATP results across three independent temporal windows. Form and H2H both improved their paired logistic profiles; no tested profile passed the stricter Elo gate across all three windows, so the active forecast remains Elo-only. The in-app training screen runs the paired ablations for both optimizer presets and evaluates the latest 15% holdout separately.
+The reproducible reference replay is documented in `benchmarks/feature_ablation_atp_2010_2024.md`. It tests 42,564 valid dated ATP results across three independent temporal windows, using both optimizer presets and paired ablations for form and H2H. The latest 15% of dates remains outside model selection. The report states which profiles pass the Elo gate, and the active forecast remains Elo-only unless a candidate passes every gate.
 
 ## Building current ATP and WTA archives
 
