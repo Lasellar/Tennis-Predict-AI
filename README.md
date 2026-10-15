@@ -2,6 +2,15 @@
 
 Android MVP for estimating tennis match win probabilities from Elo ratings.
 
+## Version 0.5.2
+
+- Added side-by-side player form summaries with overall Elo, recent results, selected-surface results, match counts and last dated match.
+- Added head-to-head history: overall meeting record, record on the planned court surface and up to five recent meetings from the imported history.
+- Added a transparent explanation panel that lists the features active in the selected profile: overall Elo, surface Elo, recent form and experience, when applicable.
+- Reframed uncertainty as an easy-to-read reliability status and kept the reasons and Elo-sensitivity range visible.
+- Head-to-head meetings are contextual information only; they do not directly change the calculated probability.
+- Added unit coverage for head-to-head summaries and exclusion of matches on/after the planned match date. Undated meetings are disclosed in the UI.
+
 ## Version 0.5.0
 
 - Redesigned the Android interface with a pinned header and four clear sections: Forecast, Data, Rankings and Model.
