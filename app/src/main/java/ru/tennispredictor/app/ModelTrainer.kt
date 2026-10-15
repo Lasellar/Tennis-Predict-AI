@@ -190,6 +190,8 @@ object ModelTrainer {
         FeatureProfile("Elo + surface Elo + recent form", listOf(0, 1, 2)),
         FeatureProfile("Elo + surface Elo + head-to-head", listOf(0, 1, 5)),
         FeatureProfile("Elo + surface Elo + recent form + head-to-head", listOf(0, 1, 2, 5)),
+        FeatureProfile("Elo + surface Elo + experience", listOf(0, 1, 3, 4)),
+        FeatureProfile("Elo + surface Elo + experience + head-to-head", listOf(0, 1, 3, 4, 5)),
         FeatureProfile("All 5 features", listOf(0, 1, 2, 3, 4)),
         FeatureProfile("All 5 features + head-to-head", listOf(0, 1, 2, 3, 4, 5))
     )
@@ -401,6 +403,16 @@ object ModelTrainer {
                 "Elo + surface Elo + recent form + head-to-head"
             ),
             FeatureComparisonSpec(
+                "Недавняя форма",
+                "Elo + surface Elo + experience",
+                "All 5 features"
+            ),
+            FeatureComparisonSpec(
+                "Недавняя форма",
+                "Elo + surface Elo + experience + head-to-head",
+                "All 5 features + head-to-head"
+            ),
+            FeatureComparisonSpec(
                 "Личные встречи",
                 "Elo + surface Elo",
                 "Elo + surface Elo + head-to-head"
@@ -409,6 +421,11 @@ object ModelTrainer {
                 "Личные встречи",
                 "Elo + surface Elo + recent form",
                 "Elo + surface Elo + recent form + head-to-head"
+            ),
+            FeatureComparisonSpec(
+                "Личные встречи",
+                "Elo + surface Elo + experience",
+                "Elo + surface Elo + experience + head-to-head"
             ),
             FeatureComparisonSpec(
                 "Личные встречи",
@@ -486,6 +503,7 @@ object ModelTrainer {
         val formIsJustified = !usesForm || featureEffects.any {
             it.factorName == "Недавняя форма" &&
                 it.presetName == presetName &&
+                it.candidateName == candidate.name &&
                 it.passesNoWorseGate
         }
         val headToHeadIsJustified = !usesHeadToHead || featureEffects.any {
