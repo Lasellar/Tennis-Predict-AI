@@ -76,6 +76,37 @@ class MatchPredictionEngineTest {
         assertEquals(withoutResult.probabilityA, withMatchDayResult.probabilityA, 1e-12)
         assertEquals(0, withMatchDayResult.playerAEvidence.totalMatches)
         assertEquals(0, withMatchDayResult.playerBEvidence.totalMatches)
+        assertEquals(0, withMatchDayResult.headToHead.totalMatches)
+    }
+
+    @Test
+    fun headToHeadShowsOnlyPastMeetingsAndSeparatesSelectedSurface() {
+        val history = listOf(
+            stored(1, "2026-01-01", "A. Player", "B. Player", "A. Player", Surface.HARD),
+            stored(2, "2026-01-03", "B. Player", "A. Player", "B. Player", Surface.CLAY),
+            stored(3, "2026-02-01", "A. Player", "B. Player", "B. Player", Surface.HARD),
+            stored(4, "2026-10-20", "A. Player", "B. Player", "A. Player", Surface.HARD),
+            stored(5, "2026-10-21", "B. Player", "A. Player", "B. Player", Surface.HARD)
+        )
+
+        val forecast = MatchPredictionEngine.calculate(
+            history = history,
+            playerA = "A. Player",
+            playerB = "B. Player",
+            surface = Surface.HARD,
+            matchDate = "2026-10-20"
+        )
+
+        assertEquals(3, forecast.headToHead.totalMatches)
+        assertEquals(1, forecast.headToHead.winsA)
+        assertEquals(2, forecast.headToHead.winsB)
+        assertEquals(2, forecast.headToHead.surfaceMatches)
+        assertEquals(1, forecast.headToHead.surfaceWinsA)
+        assertEquals(1, forecast.headToHead.surfaceWinsB)
+        assertEquals(3, forecast.headToHead.recentMatches.size)
+        assertEquals("2026-02-01", forecast.headToHead.recentMatches.first().date)
+        assertEquals("B. Player", forecast.headToHead.recentMatches.first().winner)
+        assertTrue(forecast.activeFeatureIndices.isEmpty())
     }
 
     @Test

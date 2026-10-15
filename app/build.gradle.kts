@@ -10,8 +10,8 @@ android {
         applicationId = "ru.tennispredictor.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 50
-        versionName = "0.5.0"
+        versionCode = 52
+        versionName = "0.5.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes { release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
