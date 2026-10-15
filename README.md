@@ -112,15 +112,18 @@ A successful GitHub Actions run publishes an artifact named tennis-predictor-deb
 
 ## Model-training and automatic selection
 
-The app trains logistic regression locally and now selects models using a time-aware validation process:
+The app trains logistic regression locally and applies conservative, time-aware model selection:
 
-- It compares three feature profiles: overall Elo, overall plus surface Elo, and all five features (overall Elo, surface Elo, recent form, total experience, and surface experience).
-- Each profile is tested with two optimization presets, for six candidate configurations total.
-- Three consecutive walk-forward intervals are used for model selection. Dates are split as complete date batches; no match outcome from a date is allowed to change another match's pre-match features for that same date.
-- Candidate models are ranked by average validation Log Loss, with Brier Score as a tie-breaker. The latest 15% of unique dates are kept as an independent final holdout and are not used to select the candidate.
-- The app only routes predictions through logistic regression when its average validation Log Loss improves on Elo by at least 0.0001. Otherwise it automatically continues to use Elo. This is intentional: a more complex model must demonstrate that it improves the historical probability estimates.
-- A selected model stores its feature profile, coefficients, hyperparameters, training date, sample count, and selection status locally. After importing more matches, prediction falls back to Elo until the model is trained again on the new history.
-- The main prediction screen uses the selected model's probability when it is recommended and its training history is current. Otherwise it shows the Elo probability and the reason the model was not applied.
+- It compares 10 feature profiles: Elo only; Elo plus surface rating, recent form, or H2H; combinations of surface rating/form/H2H; experience profiles; and the full five-feature profile with and without H2H.
+- Each profile is fitted with two optimization presets (regularized and standard), for 20 model candidates.
+- The feature vector has six slots: overall Elo difference, surface Elo difference, recent-form difference, overall experience, surface experience, and smoothed H2H difference. H2H uses only meetings before the match date and shrinks small samples toward neutral with a four-meeting prior.
+- Three consecutive walk-forward intervals are used for feature selection. All results sharing a tournament date are treated as one batch, so a match result cannot leak into another match's features on the same date. The latest 15% of unique dates is kept as an independent final holdout.
+- Form and H2H each undergo paired ablation tests against the same feature profile without that factor. A factor only passes if neither Log Loss nor Brier Score worsens by more than 0.0001 on any interval and at least one mean metric improves by 0.0001 or more.
+- A full model is only allowed to replace Elo if both Log Loss and Brier Score are non-worse than Elo on every validation interval, one mean metric improves by at least 0.0001, and each active form/H2H feature passes its own exact-context ablation.
+- A selected model stores its feature profile, coefficients, hyperparameters, feature version, training date, sample count, and selection status locally. Importing more matches invalidates the selection until training is repeated on the new history.
+- If no candidate clears every gate, real-match forecasts use the pure overall-Elo baseline. The UI continues to show recent form, surface results and H2H as evidence, but these factors do not make unvalidated hand-tuned probability adjustments.
+
+The reproducible standard-preset reference replay is documented in `benchmarks/feature_ablation_atp_2010_2024.md`. It tested 42,564 valid dated ATP results across three independent temporal windows. Form and H2H both improved their paired logistic profiles; no tested profile passed the stricter Elo gate across all three windows, so the active forecast remains Elo-only. The in-app training screen runs the paired ablations for both optimizer presets and evaluates the latest 15% holdout separately.
 
 ## Building current ATP and WTA archives
 
@@ -136,7 +139,7 @@ For an ATP-only file, the backward-compatible command remains available:
 
 The GitHub Actions workflow packages both CSVs, a ZIP containing both archives, checksums, and source/licence attribution into a downloadable build artifact. Since the primary dataset is licensed CC BY-NC-SA 4.0, the combined archive is for non-commercial use and must retain the same licence and attribution. Obtain permission from the rights holders before commercial use.
 
-The benchmark used 42,571 ATP matches from 2010–2024. On three earlier validation intervals, Elo averaged Log Loss 0.62278 and Brier Score 0.21668; the best of the six logistic candidates averaged 0.62451 and 0.21762. The final holdout (5,775 matches from 2023-02-02 through 2024-12-18) gave Elo Log Loss 0.63391 / Brier 0.22187 and logistic regression 0.63402 / 0.22199. The automatic selector therefore keeps Elo for this dataset. Full metrics, tested configurations, intervals, and source attribution are documented in benchmarks/atp_archive_2010_2024.md.
+The earlier `benchmarks/atp_archive_2010_2024.md` file records the v0.5.2 baseline experiment (a 42,571-row snapshot from a different public mirror). The v0.6 feature-ablation replay uses the current Aneeshers archive and its own exact counts and validation table, kept in `benchmarks/feature_ablation_atp_2010_2024.md`. Treat the datasets as separate snapshots rather than mixing their metric values.
 
 The third-party ATP archive is attributed to Jeff Sackmann / Tennis Abstract, using a public mirror maintained by farhadGithub. Its stated license is CC BY-NC-SA 4.0, which permits non-commercial use only unless additional permission is obtained. Do not bundle or redistribute the source archive for commercial use without checking the rights first.
 
