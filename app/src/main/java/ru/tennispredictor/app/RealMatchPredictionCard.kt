@@ -191,7 +191,8 @@ fun RealMatchPredictionCard(
                                                 playerB = playerB.trim(),
                                                 surface = selectedSurface,
                                                 matchDate = validDate,
-                                                model = model
+                                                model = model,
+                                                historyAlreadyOrdered = true
                                             )
                                         }
                                         val a = result.playerAEvidence
