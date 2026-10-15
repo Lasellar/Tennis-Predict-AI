@@ -203,7 +203,7 @@ private fun PredictorScreen() {
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                "${storedMatches.size}",
+                                "${matchCount}",
                                 style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.secondary,
                                 fontWeight = FontWeight.Bold
@@ -522,7 +522,7 @@ private fun PredictorScreen() {
                 ) {
                     SummaryTile(
                         label = "Матчей на устройстве",
-                        value = storedMatches.size.toString(),
+                        value = matchCount.toString(),
                         modifier = Modifier.weight(1f)
                     )
                     SummaryTile(
@@ -603,7 +603,7 @@ private fun PredictorScreen() {
                 )
                 RankingCard(
                     title = "Общий рейтинг Elo",
-                    subtitle = "Все покрытия · ${storedMatches.size} матчей",
+                    subtitle = "Все покрытия · ${matchCount} матчей",
                     players = ratingSnapshot.overall
                 )
                 RankingCard(
