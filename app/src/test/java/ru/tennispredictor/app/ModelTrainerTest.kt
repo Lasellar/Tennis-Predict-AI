@@ -33,9 +33,16 @@ class ModelTrainerTest {
             a.meanLogLoss <= b.meanLogLoss + 1e-12
         })
         assertTrue(report.candidateResults.all { candidate ->
-            !candidate.eligibleForPrediction ||
+            candidate.eligibleForPrediction ==
                 (candidate.passesEloTemporalGate && candidate.featureEvidencePassed)
         })
+        assertEquals(
+            report.logisticSelectedForPrediction,
+            report.candidateResults.any { it.eligibleForPrediction }
+        )
+        assertEquals(report.logisticSelectedForPrediction, report.model.recommendedForPrediction)
+        assertEquals(2, report.featureEffects.map { it.presetName }.distinct().size)
+        assertTrue(report.featureEffects.groupBy { it.presetName }.values.all { it.size == 9 })
     }
 
     @Test
