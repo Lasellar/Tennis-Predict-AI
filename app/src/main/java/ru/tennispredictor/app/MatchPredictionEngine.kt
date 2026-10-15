@@ -130,8 +130,10 @@ object SavedPredictionEvaluator {
 
 /**
  * Builds forecasts only from results dated before the requested match date.
- * When the selected logistic model is current and its training history is fully dated,
- * it is used; otherwise the transparent Elo + surface + recent-form fallback is used.
+ * A current logistic model is used only when temporal validation approved it and
+ * its training history still matches the database. Otherwise, the forecast falls
+ * back to the Elo baseline; surface/form/H2H remain visible as evidence, not as
+ * unvalidated manual probability adjustments.
  */
 object MatchPredictionEngine {
     private const val K_FACTOR = 32.0
@@ -311,13 +313,15 @@ object MatchPredictionEngine {
         }
 
         val learned = learnedProbability(evidenceA.overallElo, evidenceB.overallElo)
-        val probability = learned ?: TennisPredictor.probability(DEFAULT_ELO + adjustedDifference, DEFAULT_ELO)
+        // Do not apply hand-tuned surface/form weights when no model has proved
+        // that those adjustments improve calibrated probabilities on the time splits.
+        val probability = learned ?: TennisPredictor.probability(evidenceA.overallElo, evidenceB.overallElo)
         val lowSensitivity = learned?.let {
             learnedProbability(evidenceA.overallElo - 100.0, evidenceB.overallElo + 100.0)
-        } ?: TennisPredictor.probability(DEFAULT_ELO + adjustedDifference - 200.0, DEFAULT_ELO)
+        } ?: TennisPredictor.probability(evidenceA.overallElo - 100.0, evidenceB.overallElo + 100.0)
         val highSensitivity = learned?.let {
             learnedProbability(evidenceA.overallElo + 100.0, evidenceB.overallElo - 100.0)
-        } ?: TennisPredictor.probability(DEFAULT_ELO + adjustedDifference + 200.0, DEFAULT_ELO)
+        } ?: TennisPredictor.probability(evidenceA.overallElo + 100.0, evidenceB.overallElo - 100.0)
         val lower = minOf(lowSensitivity ?: probability, highSensitivity ?: probability, probability)
         val upper = maxOf(lowSensitivity ?: probability, highSensitivity ?: probability, probability)
 
@@ -362,7 +366,7 @@ object MatchPredictionEngine {
             source = if (learned != null && model != null) {
                 "Логистическая регрессия: ${model.profileName}"
             } else {
-                "Elo + последние результаты + покрытие"
+                "Elo baseline — дополнительные признаки не прошли общий quality gate"
             }
         )
     }
