@@ -139,8 +139,9 @@ def load_matches(path: Path) -> list[Match]:
             if dt is None or not a or not b or a == b or winner not in {a, b}:
                 continue
             a, b = sorted((a, b))
-            # Treat same-day duplicates as a single result, as the archive downloader does.
-            dedupe = (dt.isoformat(), min(a, b), max(a, b))
+            # Match the archive builder's deduplication key: date, winner, loser.
+            loser = b if winner == a else a
+            dedupe = (dt.isoformat(), winner, loser)
             if dedupe in seen:
                 continue
             seen.add(dedupe)
