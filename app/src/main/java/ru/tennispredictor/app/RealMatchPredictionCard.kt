@@ -156,7 +156,7 @@ fun RealMatchPredictionCard(
                 }
 
                 Text(
-                    "В базе: ${players.size} игроков · ${matches.size} матчей",
+                    "В базе: ${players.size} игроков · ${matchCount} матчей",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Button(
