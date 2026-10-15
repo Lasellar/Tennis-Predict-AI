@@ -23,7 +23,6 @@ import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Locale
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
