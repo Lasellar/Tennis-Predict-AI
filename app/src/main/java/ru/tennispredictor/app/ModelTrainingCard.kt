@@ -29,7 +29,8 @@ import java.util.Locale
 
 @Composable
 fun ModelTrainingCard(
-    matches: List<StoredMatch>,
+    database: MatchDatabase,
+    matchCount: Int,
     onModelTrained: (LogisticRegressionModel) -> Unit
 ) {
     val context = LocalContext.current
@@ -50,8 +51,8 @@ fun ModelTrainingCard(
                     "Кандидат допускается к прогнозам только если Log Loss и Brier не ухудшаются на каждом из трёх временных интервалов относительно Elo, " +
                     "а новые факторы доказали полезность. Последние 15% дат — отдельная финальная проверка."
             )
-            if (matches.size < ModelTrainer.MINIMUM_DATED_MATCHES) {
-                Text("Матчей импортировано: ${matches.size}. Для обучения требуется минимум ${ModelTrainer.MINIMUM_DATED_MATCHES} корректных датированных матчей.")
+            if (matchCount < ModelTrainer.MINIMUM_DATED_MATCHES) {
+                Text("Матчей импортировано: ${matchCount}. Для обучения требуется минимум ${ModelTrainer.MINIMUM_DATED_MATCHES} корректных датированных матчей.")
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
 
@@ -170,10 +171,12 @@ fun ModelTrainingCard(
 
             Button(
                 onClick = {
-                    val snapshot = matches.toList()
                     busy = true
                     scope.launch {
                         try {
+                            val snapshot = withContext(Dispatchers.IO) {
+                                database.loadMatches()
+                            }
                             val result = withContext(Dispatchers.Default) {
                                 ModelTrainer.trainAndEvaluate(snapshot)
                             }
@@ -188,7 +191,7 @@ fun ModelTrainingCard(
                         }
                     }
                 },
-                enabled = !busy && matches.size >= ModelTrainer.MINIMUM_DATED_MATCHES,
+                enabled = !busy && matchCount >= ModelTrainer.MINIMUM_DATED_MATCHES,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (busy) "Обучаем и проверяем…" else "Обучить, сравнить и выбрать модель")
