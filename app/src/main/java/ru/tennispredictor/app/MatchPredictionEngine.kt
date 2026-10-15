@@ -42,7 +42,8 @@ data class HeadToHeadEvidence(
     val surfaceMatches: Int,
     val surfaceWinsA: Int,
     val surfaceWinsB: Int,
-    /** Up to five most recent meetings, in newest-first order. */
+    val undatedMatches: Int,
+    /** Last five meetings in the engine's pre-match history order, newest first when dates are complete. */
     val recentMatches: List<HeadToHeadMatch>
 )
 
@@ -276,6 +277,7 @@ object MatchPredictionEngine {
             surfaceMatches = surfaceMeetings.size,
             surfaceWinsA = surfaceMeetings.count { it.playerAWon },
             surfaceWinsB = surfaceMeetings.count { !it.playerAWon },
+            undatedMatches = headToHeadMatches.count { parseDate(it.date) == null },
             recentMatches = headToHeadMatches.takeLast(5).reversed()
         )
 
