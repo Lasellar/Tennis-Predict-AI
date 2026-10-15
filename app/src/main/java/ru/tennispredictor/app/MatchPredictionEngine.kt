@@ -151,9 +151,10 @@ object MatchPredictionEngine {
         var overallElo: Double = DEFAULT_ELO,
         val surfaceElos: MutableMap<Surface, Double> = mutableMapOf(),
         var totalMatches: Int = 0,
-        val surfaceMatchCounts: MutableMap<Surface, Int> = mutableMapOf(),
-        val recentResults: MutableList<HistoricalResult> = mutableListOf(),
-        val recentResultsBySurface: MutableMap<Surface, MutableList<HistoricalResult>> = mutableMapOf(),
+        val surfaceMatchCounts: MutableMap<Surface, Int>? = if (trackHistory) mutableMapOf() else null,
+        val recentResults: MutableList<HistoricalResult>? = if (trackHistory) mutableListOf() else null,
+        val recentResultsBySurface: MutableMap<Surface, MutableList<HistoricalResult>>? =
+            if (trackHistory) mutableMapOf() else null,
         var lastMatchDate: String = "",
         var undatedMatches: Int = 0
     )
@@ -220,7 +221,8 @@ object MatchPredictionEngine {
         }
 
         val states = mutableMapOf<String, PlayerState>()
-        val displayNames = linkedMapOf<String, String>()
+        var displayNameA: String? = null
+        var displayNameB: String? = null
         val headToHeadMatches = mutableListOf<HeadToHeadMatch>()
 
         // Stream over the ordered history. Only the two requested players retain
@@ -237,8 +239,10 @@ object MatchPredictionEngine {
                     (winner != recordA && winner != recordB)
                 ) return@forEach
 
-                if (!displayNames.containsKey(recordA)) displayNames[recordA] = collapseWhitespace(record.playerA)
-                if (!displayNames.containsKey(recordB)) displayNames[recordB] = collapseWhitespace(record.playerB)
+                if (recordA == keyA && displayNameA == null) displayNameA = collapseWhitespace(record.playerA)
+                if (recordB == keyA && displayNameA == null) displayNameA = collapseWhitespace(record.playerB)
+                if (recordA == keyB && displayNameB == null) displayNameB = collapseWhitespace(record.playerA)
+                if (recordB == keyB && displayNameB == null) displayNameB = collapseWhitespace(record.playerB)
 
                 val stateA = states.getOrPut(recordA) {
                     PlayerState(trackHistory = recordA == keyA || recordA == keyB)
@@ -262,23 +266,20 @@ object MatchPredictionEngine {
                     stateB.surfaceElos[record.surface] = surfaceB - surfaceDelta
                 }
 
-                stateA.totalMatches++
-                stateB.totalMatches++
-                stateA.surfaceMatchCounts[record.surface] = stateA.surfaceMatchCounts.getOrDefault(record.surface, 0) + 1
-                stateB.surfaceMatchCounts[record.surface] = stateB.surfaceMatchCounts.getOrDefault(record.surface, 0) + 1
-
-                if (parsedRecordDate == null) {
-                    stateA.undatedMatches++
-                    stateB.undatedMatches++
-                } else {
-                    stateA.lastMatchDate = record.date
-                    stateB.lastMatchDate = record.date
-                }
-
                 if (stateA.trackHistory) {
+                    stateA.totalMatches++
+                    val counts = requireNotNull(stateA.surfaceMatchCounts)
+                    counts[record.surface] = counts.getOrDefault(record.surface, 0) + 1
+                    if (parsedRecordDate == null) stateA.undatedMatches++
+                    else stateA.lastMatchDate = record.date
                     addRecentResult(stateA, HistoricalResult(record.date, record.surface, aWon))
                 }
                 if (stateB.trackHistory) {
+                    stateB.totalMatches++
+                    val counts = requireNotNull(stateB.surfaceMatchCounts)
+                    counts[record.surface] = counts.getOrDefault(record.surface, 0) + 1
+                    if (parsedRecordDate == null) stateB.undatedMatches++
+                    else stateB.lastMatchDate = record.date
                     addRecentResult(stateB, HistoricalResult(record.date, record.surface, !aWon))
                 }
 
@@ -297,8 +298,8 @@ object MatchPredictionEngine {
 
         val stateA = states[keyA] ?: PlayerState(trackHistory = true)
         val stateB = states[keyB] ?: PlayerState(trackHistory = true)
-        val evidenceA = evidence(cleanA, stateA, surface, cutoff, displayNames[keyA])
-        val evidenceB = evidence(cleanB, stateB, surface, cutoff, displayNames[keyB])
+        val evidenceA = evidence(cleanA, stateA, surface, cutoff, displayNameA)
+        val evidenceB = evidence(cleanB, stateB, surface, cutoff, displayNameB)
 
         // H2H is gathered inline from only meetings between the selected players.
         val surfaceMeetings = headToHeadMatches.filter { it.surface == surface }
@@ -408,8 +409,8 @@ object MatchPredictionEngine {
         cutoff: LocalDate,
         displayName: String?
     ): PlayerEvidence {
-        val recent = state.recentResults
-        val surfaceRecent = state.recentResultsBySurface[surface].orEmpty()
+        val recent = state.recentResults.orEmpty()
+        val surfaceRecent = state.recentResultsBySurface?.get(surface).orEmpty()
         val lastDate = state.lastMatchDate
         val daysSince = parseDate(lastDate)?.let { java.time.temporal.ChronoUnit.DAYS.between(it, cutoff) }
         return PlayerEvidence(
@@ -417,7 +418,7 @@ object MatchPredictionEngine {
             overallElo = state.overallElo,
             surfaceElo = state.surfaceElos.getOrDefault(surface, DEFAULT_ELO),
             totalMatches = state.totalMatches,
-            surfaceMatches = state.surfaceMatchCounts.getOrDefault(surface, 0),
+            surfaceMatches = state.surfaceMatchCounts?.get(surface) ?: 0,
             recentWins = recent.count { it.won },
             recentMatches = recent.size,
             surfaceRecentWins = surfaceRecent.count { it.won },
@@ -429,9 +430,10 @@ object MatchPredictionEngine {
     }
 
     private fun addRecentResult(state: PlayerState, result: HistoricalResult) {
-        if (!state.trackHistory) return
-        appendBounded(state.recentResults, result)
-        val surfaceResults = state.recentResultsBySurface.getOrPut(result.surface) { mutableListOf() }
+        val recentResults = state.recentResults ?: return
+        appendBounded(recentResults, result)
+        val surfaceBuffers = state.recentResultsBySurface ?: return
+        val surfaceResults = surfaceBuffers.getOrPut(result.surface) { mutableListOf() }
         appendBounded(surfaceResults, result)
     }
 
