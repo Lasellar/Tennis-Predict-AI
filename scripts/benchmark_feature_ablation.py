@@ -237,8 +237,7 @@ def prepare_samples(matches: list[Match]) -> tuple[list[date], np.ndarray, np.nd
 
 
 def fit(x: np.ndarray, y: np.ndarray, indices: tuple[int, ...],
-        iterations: int = ITERATIONS, lr: float = LEARNING_RATE,
-        l2: float = L2_STRENGTH) -> np.ndarray:
+        iterations: int, lr: float, l2: float) -> np.ndarray:
     selected = x[:, indices]
     weights = np.zeros(len(indices) + 1, dtype=float)
     for _ in range(iterations):
