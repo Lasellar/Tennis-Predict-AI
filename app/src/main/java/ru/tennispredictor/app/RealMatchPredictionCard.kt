@@ -592,7 +592,7 @@ private fun HeadToHeadCard(item: MatchForecast) {
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "Учтены только матчи из истории до ${item.matchDate}.",
+                "Датированные матчи — до ${item.matchDate}. Записей без даты: ${h2h.undatedMatches}.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -627,7 +627,7 @@ private fun HeadToHeadCard(item: MatchForecast) {
                 fontWeight = FontWeight.SemiBold
             )
             HorizontalDivider()
-            Text("Последние встречи", fontWeight = FontWeight.SemiBold)
+            Text("Последние встречи в истории", fontWeight = FontWeight.SemiBold)
             if (h2h.totalMatches == 0) {
                 Text(
                     "В импортированной истории личных встреч не найдено.",
