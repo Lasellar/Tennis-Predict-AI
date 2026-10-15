@@ -485,3 +485,20 @@ class MatchDatabase(context: Context) :
         const val LEGACY_TABLE_PREDICTIONS = "predictions"
     }
 }
+
+
+/**
+ * Application-scoped database helper. Keeping one helper for the process avoids
+ * closing an active SQLite cursor when Android recreates the Activity on rotation.
+ */
+object MatchDatabaseProvider {
+    @Volatile
+    private var instance: MatchDatabase? = null
+
+    fun get(context: Context): MatchDatabase {
+        instance?.let { return it }
+        return synchronized(this) {
+            instance ?: MatchDatabase(context.applicationContext).also { instance = it }
+        }
+    }
+}
