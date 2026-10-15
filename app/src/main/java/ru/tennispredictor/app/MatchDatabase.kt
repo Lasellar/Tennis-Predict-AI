@@ -98,11 +98,23 @@ class MatchDatabase(context: Context) :
      */
     fun loadSummary(): MatchDatabaseSummary {
         val db = readableDatabase
-        val matchCount = countMatches(db, null, null)
-        val hardCount = countMatches(db, "surface = ?", arrayOf(Surface.HARD.name))
-        val clayCount = countMatches(db, "surface = ?", arrayOf(Surface.CLAY.name))
-        val grassCount = countMatches(db, "surface = ?", arrayOf(Surface.GRASS.name))
-        val orderBy = if (hasUndatedMatches(db)) "id ASC" else "match_date ASC, id ASC"
+        // One aggregate query replaces five independent table scans.
+        val counts = db.rawQuery(
+            """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN surface = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN surface = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN surface = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN match_date IS NULL OR TRIM(match_date) = '' THEN 1 ELSE 0 END), 0)
+            FROM $TABLE_MATCHES
+            """.trimIndent(),
+            arrayOf(Surface.HARD.name, Surface.CLAY.name, Surface.GRASS.name)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) IntArray(5) { cursor.getInt(it) } else IntArray(5)
+        }
+
+        val orderBy = if (counts[4] > 0) "id ASC" else "match_date ASC, id ASC"
         val accumulator = RatingCalculator.Accumulator()
         db.query(
             TABLE_MATCHES,
@@ -114,14 +126,22 @@ class MatchDatabase(context: Context) :
             orderBy
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                accumulator.add(cursorToStoredMatch(cursor).record)
+                val surface = runCatching {
+                    Surface.valueOf(cursor.getString(5))
+                }.getOrDefault(Surface.OTHER)
+                accumulator.add(
+                    rawPlayerA = cursor.getString(2),
+                    rawPlayerB = cursor.getString(3),
+                    rawWinner = cursor.getString(4),
+                    surface = surface
+                )
             }
         }
         return MatchDatabaseSummary(
-            matchCount = matchCount,
-            hardMatchCount = hardCount,
-            clayMatchCount = clayCount,
-            grassMatchCount = grassCount,
+            matchCount = counts[0],
+            hardMatchCount = counts[1],
+            clayMatchCount = counts[2],
+            grassMatchCount = counts[3],
             ratings = accumulator.snapshot()
         )
     }
