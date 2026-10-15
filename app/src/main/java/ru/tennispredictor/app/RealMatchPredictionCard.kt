@@ -28,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
@@ -46,7 +45,6 @@ fun RealMatchPredictionCard(
     database: MatchDatabase,
     model: LogisticRegressionModel?
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var playerA by remember { mutableStateOf("") }
     var playerB by remember { mutableStateOf("") }
