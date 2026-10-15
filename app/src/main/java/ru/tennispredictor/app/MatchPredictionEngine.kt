@@ -28,6 +28,24 @@ data class PlayerEvidence(
         get() = if (recentMatches == 0) "нет данных" else "$recentWins/$recentMatches"
 }
 
+data class HeadToHeadMatch(
+    val date: String,
+    val surface: Surface,
+    val winner: String,
+    val playerAWon: Boolean
+)
+
+data class HeadToHeadEvidence(
+    val totalMatches: Int,
+    val winsA: Int,
+    val winsB: Int,
+    val surfaceMatches: Int,
+    val surfaceWinsA: Int,
+    val surfaceWinsB: Int,
+    /** Up to five most recent meetings, in newest-first order. */
+    val recentMatches: List<HeadToHeadMatch>
+)
+
 data class MatchForecast(
     val matchDate: String,
     val playerA: String,
@@ -39,6 +57,9 @@ data class MatchForecast(
     val adjustedRatingDifference: Double,
     val playerAEvidence: PlayerEvidence,
     val playerBEvidence: PlayerEvidence,
+    val headToHead: HeadToHeadEvidence,
+    /** Canonical ModelTrainer feature indices actually used; empty means Elo/form fallback. */
+    val activeFeatureIndices: List<Int>,
     val uncertaintyLabel: String,
     val uncertaintyReason: String,
     val probabilityLow: Double,
@@ -229,6 +250,35 @@ object MatchPredictionEngine {
         val evidenceA = evidence(cleanA, stateA, surface, cutoff, displayNames[keyA])
         val evidenceB = evidence(cleanB, stateB, surface, cutoff, displayNames[keyB])
 
+        // H2H is gathered from the same pre-match history snapshot as the forecast.
+        // It is displayed as context, but does not change the model probability.
+        val headToHeadMatches = validMatches.mapNotNull { (stored, historyA, historyB) ->
+            val isMeeting =
+                (historyA == keyA && historyB == keyB) ||
+                    (historyA == keyB && historyB == keyA)
+            if (!isMeeting) {
+                null
+            } else {
+                val winnerIsA = normalizeName(stored.record.winner) == keyA
+                HeadToHeadMatch(
+                    date = stored.record.date,
+                    surface = stored.record.surface,
+                    winner = if (winnerIsA) cleanA else cleanB,
+                    playerAWon = winnerIsA
+                )
+            }
+        }
+        val surfaceMeetings = headToHeadMatches.filter { it.surface == surface }
+        val headToHead = HeadToHeadEvidence(
+            totalMatches = headToHeadMatches.size,
+            winsA = headToHeadMatches.count { it.playerAWon },
+            winsB = headToHeadMatches.count { !it.playerAWon },
+            surfaceMatches = surfaceMeetings.size,
+            surfaceWinsA = surfaceMeetings.count { it.playerAWon },
+            surfaceWinsB = surfaceMeetings.count { !it.playerAWon },
+            recentMatches = headToHeadMatches.takeLast(5).reversed()
+        )
+
         val overallDifference = evidenceA.overallElo - evidenceB.overallElo
         val surfaceDifference = evidenceA.surfaceElo - evidenceB.surfaceElo
         val commonSurfaceHistory = minOf(evidenceA.surfaceMatches, evidenceB.surfaceMatches)
@@ -301,6 +351,8 @@ object MatchPredictionEngine {
             adjustedRatingDifference = adjustedDifference,
             playerAEvidence = evidenceA,
             playerBEvidence = evidenceB,
+            headToHead = headToHead,
+            activeFeatureIndices = if (learned != null && model != null) model.featureIndices.toList() else emptyList(),
             uncertaintyLabel = uncertainty,
             uncertaintyReason = uncertaintyReason,
             probabilityLow = lower.coerceIn(0.001, 0.999),
