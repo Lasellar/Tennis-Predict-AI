@@ -189,22 +189,6 @@ class MatchDatabase(context: Context) :
         )
     }
 
-    private fun countMatches(
-        db: SQLiteDatabase,
-        selection: String?,
-        selectionArgs: Array<String>?
-    ): Int = db.query(
-        TABLE_MATCHES,
-        arrayOf("COUNT(*)"),
-        selection,
-        selectionArgs,
-        null,
-        null,
-        null
-    ).use { cursor ->
-        if (cursor.moveToFirst()) cursor.getInt(0) else 0
-    }
-
     private fun hasUndatedMatches(db: SQLiteDatabase): Boolean =
         db.rawQuery(
             "SELECT 1 FROM $TABLE_MATCHES WHERE match_date IS NULL OR TRIM(match_date) = '' LIMIT 1",
