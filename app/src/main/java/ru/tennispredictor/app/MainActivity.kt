@@ -52,6 +52,20 @@ private data class ImportUiResult(
 private object HistorySummaryCache {
     @Volatile var summary: MatchDatabaseSummary? = null
     @Volatile var playerNames: List<String>? = null
+
+    fun getOrLoadSummary(loader: () -> MatchDatabaseSummary): MatchDatabaseSummary {
+        summary?.let { return it }
+        return synchronized(this) {
+            summary ?: loader().also { summary = it }
+        }
+    }
+
+    fun getOrLoadPlayerNames(loader: () -> List<String>): List<String> {
+        playerNames?.let { return it }
+        return synchronized(this) {
+            playerNames ?: loader().also { playerNames = it }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +73,7 @@ private object HistorySummaryCache {
 private fun PredictorScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val database = remember { MatchDatabase(context.applicationContext) }
+    val database = remember { MatchDatabaseProvider.get(context.applicationContext) }
 
     var playerA by remember { mutableStateOf("Player A") }
     var playerB by remember { mutableStateOf("Player B") }
@@ -88,30 +102,19 @@ private fun PredictorScreen() {
     var trainedModel by remember { mutableStateOf<LogisticRegressionModel?>(null) }
     var predictionSource by remember { mutableStateOf("Источник: базовая модель Elo") }
 
-    DisposableEffect(database) {
-        onDispose { database.close() }
-    }
-
     LaunchedEffect(database) {
-        var summary = HistorySummaryCache.summary
-        if (summary == null) {
-            summary = withContext(Dispatchers.IO) { database.loadSummary() }
-            HistorySummaryCache.summary = summary
+        val summary = withContext(Dispatchers.IO) {
+            HistorySummaryCache.getOrLoadSummary { database.loadSummary() }
         }
-        summary?.let {
-            matchCount = it.matchCount
-            hardMatchCount = it.hardMatchCount
-            clayMatchCount = it.clayMatchCount
-            grassMatchCount = it.grassMatchCount
-            ratingSnapshot = it.ratings
-        }
+        matchCount = summary.matchCount
+        hardMatchCount = summary.hardMatchCount
+        clayMatchCount = summary.clayMatchCount
+        grassMatchCount = summary.grassMatchCount
+        ratingSnapshot = summary.ratings
 
-        var names = HistorySummaryCache.playerNames
-        if (names == null) {
-            names = withContext(Dispatchers.IO) { database.loadPlayerNames() }
-            HistorySummaryCache.playerNames = names
+        playerNames = withContext(Dispatchers.IO) {
+            HistorySummaryCache.getOrLoadPlayerNames { database.loadPlayerNames() }
         }
-        playerNames = names.orEmpty()
         trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
     }
 
