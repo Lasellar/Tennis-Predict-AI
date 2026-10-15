@@ -24,9 +24,10 @@ K_FACTOR = 32.0
 ELO_SCALE = 400.0
 RECENT_WINDOW = 10
 H2H_PRIOR_MATCHES = 4.0
-ITERATIONS = 140
-LEARNING_RATE = 0.08
-L2_STRENGTH = 0.01
+PRESETS = (
+    ("regularized", 80, 0.10, 0.10),
+    ("standard", 140, 0.08, 0.01),
+)
 NO_WORSE_TOLERANCE = 1e-4
 MINIMUM_GAIN = 1e-4
 
@@ -297,37 +298,45 @@ def run(path: Path) -> dict[str, object]:
             raise ValueError("A validation fold has too few matches.")
         folds.append((start, end, tr, te))
 
-    candidates: dict[str, dict[str, object]] = {}
-    for name, indices in PROFILES:
-        fold_results = []
-        for start, end, tr, te in folds:
-            weights = fit(x[tr], y[tr], indices)
-            model_metrics = metrics(y[te], predict(x[te], weights, indices))
-            elo_metrics = metrics(y[te], 1.0 / (1.0 + np.exp(
-                -np.clip(elo_diff[te] / ELO_SCALE * math.log(10.0), -35.0, 35.0))))
-            fold_results.append({
-                "start": start.isoformat(),
-                "end_exclusive": end.isoformat(),
-                "train_matches": int(tr.sum()),
-                "test_matches": int(te.sum()),
-                "model": model_metrics,
-                "elo": elo_metrics,
-            })
-        candidates[name] = {
-            "name": name,
-            "indices": list(indices),
-            "folds": fold_results,
-            "mean_log_loss": float(np.mean([f["model"]["log_loss"] for f in fold_results])),
-            "mean_brier_score": float(np.mean([f["model"]["brier_score"] for f in fold_results])),
-            "passes_elo_gate": no_worse([{
-                "delta_log_loss": f["model"]["log_loss"] - f["elo"]["log_loss"],
-                "delta_brier": f["model"]["brier_score"] - f["elo"]["brier_score"],
-            } for f in fold_results]),
-        }
+    candidates: dict[tuple[str, str], dict[str, object]] = {}
+    for preset_name, iterations, lr, l2 in PRESETS:
+        for name, indices in PROFILES:
+            fold_results = []
+            for start, end, tr, te in folds:
+                weights = fit(x[tr], y[tr], indices, iterations=iterations, lr=lr, l2=l2)
+                model_metrics = metrics(y[te], predict(x[te], weights, indices))
+                elo_metrics = metrics(y[te], 1.0 / (1.0 + np.exp(
+                    -np.clip(elo_diff[te] / ELO_SCALE * math.log(10.0), -35.0, 35.0))))
+                fold_results.append({
+                    "start": start.isoformat(),
+                    "end_exclusive": end.isoformat(),
+                    "train_matches": int(tr.sum()),
+                    "test_matches": int(te.sum()),
+                    "model": model_metrics,
+                    "elo": elo_metrics,
+                })
+            candidates[(name, preset_name)] = {
+                "name": name + " / " + preset_name,
+                "profile": name,
+                "preset": preset_name,
+                "indices": list(indices),
+                "iterations": iterations,
+                "learning_rate": lr,
+                "l2_strength": l2,
+                "folds": fold_results,
+                "mean_log_loss": float(np.mean([f["model"]["log_loss"] for f in fold_results])),
+                "mean_brier_score": float(np.mean([f["model"]["brier_score"] for f in fold_results])),
+                "passes_elo_gate": no_worse([{
+                    "delta_log_loss": f["model"]["log_loss"] - f["elo"]["log_loss"],
+                    "delta_brier": f["model"]["brier_score"] - f["elo"]["brier_score"],
+                } for f in fold_results]),
+            }
 
     effects = []
-    for factor, baseline_name, candidate_name in COMPARISONS:
-        baseline, candidate = candidates[baseline_name], candidates[candidate_name]
+    for preset_name, _iterations, _lr, _l2 in PRESETS:
+      for factor, baseline_name, candidate_name in COMPARISONS:
+        baseline = candidates[(baseline_name, preset_name)]
+        candidate = candidates[(candidate_name, preset_name)]
         paired = []
         for before, after in zip(baseline["folds"], candidate["folds"]):
             paired.append({
@@ -342,8 +351,9 @@ def run(path: Path) -> dict[str, object]:
             })
         effect = {
             "factor": factor,
-            "baseline": baseline_name,
-            "candidate": candidate_name,
+            "preset": preset_name,
+            "baseline": baseline["name"],
+            "candidate": candidate["name"],
             "baseline_mean_log_loss": float(np.mean([f["model"]["log_loss"] for f in baseline["folds"]])),
             "candidate_mean_log_loss": float(np.mean([f["model"]["log_loss"] for f in candidate["folds"]])),
             "baseline_mean_brier": float(np.mean([f["model"]["brier_score"] for f in baseline["folds"]])),
@@ -370,15 +380,19 @@ def run(path: Path) -> dict[str, object]:
             } for start, end, tr, te in folds],
         },
         "protocol": {
-            "optimizer": "standard",
-            "iterations": ITERATIONS,
-            "learning_rate": LEARNING_RATE,
-            "l2_strength": L2_STRENGTH,
+            "presets": [
+                {"name": name, "iterations": iterations, "learning_rate": lr, "l2_strength": l2}
+                for name, iterations, lr, l2 in PRESETS
+            ],
             "per_fold_tolerance": NO_WORSE_TOLERANCE,
             "minimum_mean_gain": MINIMUM_GAIN,
             "holdout_note": "The latest 15% of unique dates is not used for candidate selection.",
         },
-        "candidates": list(candidates.values()),
+        "candidates": [
+            candidates[(profile_name, preset_name)]
+            for preset_name, _iterations, _lr, _l2 in PRESETS
+            for profile_name, _indices in PROFILES
+        ],
         "feature_effects": effects,
     }
 
@@ -399,8 +413,10 @@ def markdown(result: dict[str, object]) -> str:
         "Valid dated matches: " + format(data["matches"], ","),
         "Date span: " + str(data["first_date"]) + " through " + str(data["last_date"]),
         "Distinct tournament dates: " + str(data["unique_dates"]),
-        "Optimizer: standard, " + str(protocol["iterations"]) + " iterations, learning rate " +
-        str(protocol["learning_rate"]) + ", L2 " + str(protocol["l2_strength"]),
+        "Optimizer presets: " + "; ".join(
+            f'{p["name"]} ({p["iterations"]} iterations, lr={p["learning_rate"]}, L2={p["l2_strength"]})'
+            for p in protocol["presets"]
+        ),
         "All matches on the same tournament date share a pre-date feature snapshot.",
         "H2H feature is (prior wins A minus prior wins B) divided by (prior meetings + 4), which shrinks small samples toward neutral.",
         "Threshold: neither metric may worsen by more than 0.0001 on any fold, and at least one mean metric must improve by 0.0001.",
@@ -420,7 +436,7 @@ def markdown(result: dict[str, object]) -> str:
         "Candidate profiles",
         "------------------",
         "",
-        "Profile | Features | Mean Log Loss | Mean Brier | Fold Log Loss | Fold Brier | Elo gate",
+        "Profile / preset | Features | Mean Log Loss | Mean Brier | Fold Log Loss | Fold Brier | Elo gate",
         "--- | ---: | ---: | ---: | --- | --- | ---",
     ])
     for item in result["candidates"]:
@@ -436,13 +452,13 @@ def markdown(result: dict[str, object]) -> str:
         "",
         "Delta is candidate minus baseline; a negative value is better. The factor passes only if both metrics remain non-worse within tolerance on every fold and one mean metric improves meaningfully.",
         "",
-        "Factor | Baseline | Candidate | Mean Δ Log Loss | Mean Δ Brier | Per-fold Δ LL | Per-fold Δ Brier | Pass",
-        "--- | --- | --- | ---: | ---: | --- | --- | ---",
+        "Factor | Preset | Baseline | Candidate | Mean Δ Log Loss | Mean Δ Brier | Per-fold Δ LL | Per-fold Δ Brier | Pass",
+        "--- | --- | --- | --- | ---: | ---: | --- | --- | ---",
     ])
     for item in result["feature_effects"]:
         ll = " / ".join(f'{f["delta_log_loss"]:+.6f}' for f in item["folds"])
         br = " / ".join(f'{f["delta_brier"]:+.6f}' for f in item["folds"])
-        lines.append(f'{item["factor"]} | {item["baseline"]} | {item["candidate"]} | ' +
+        lines.append(f'{item["factor"]} | {item["preset"]} | {item["baseline"]} | {item["candidate"]} | ' +
                      f'{item["delta_mean_log_loss"]:+.6f} | {item["delta_mean_brier"]:+.6f} | ' +
                      f'{ll} | {br} | ' + ("yes" if item["passes"] else "no"))
     lines.extend([
