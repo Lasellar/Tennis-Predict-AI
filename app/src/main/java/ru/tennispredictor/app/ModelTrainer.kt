@@ -8,7 +8,7 @@ import kotlin.math.ln
 
 /**
  * Trained coefficients and the selected feature/optimization configuration.
- * Feature values are always supplied in the canonical five-feature order.
+ * Feature values are supplied in a stable canonical six-feature order.
  */
 data class LogisticRegressionModel(
     val weights: List<Double>,
@@ -36,8 +36,8 @@ data class LogisticRegressionModel(
     }
 
     companion object {
-        const val FEATURE_COUNT = 5
-        const val FEATURE_VERSION = 2
+        const val FEATURE_COUNT = 6
+        const val FEATURE_VERSION = 3
     }
 }
 
@@ -64,6 +64,7 @@ data class ModelComparisonReport(
     val validationModelMeanLogLoss: Double,
     val validationModelMeanBrier: Double,
     val validationFolds: List<TemporalValidationFold>,
+    val featureEffects: List<FeatureEffectResult>,
     val logisticSelectedForPrediction: Boolean
 )
 
@@ -85,8 +86,43 @@ data class ModelCandidateResult(
     val l2Strength: Double,
     val folds: List<TemporalValidationFold>,
     val meanLogLoss: Double,
-    val meanBrierScore: Double
+    val meanBrierScore: Double,
+    /** True only when neither metric is worse than Elo on any validation interval and at least one improves. */
+    val passesEloTemporalGate: Boolean = false,
+    /** True only when every investigated new feature in this profile has passed its paired ablation test. */
+    val featureEvidencePassed: Boolean = false,
+    val eligibleForPrediction: Boolean = false
 )
+
+data class FeatureEffectFold(
+    val startDate: String,
+    val endDate: String,
+    val testMatches: Int,
+    val baselineLogLoss: Double,
+    val candidateLogLoss: Double,
+    val baselineBrierScore: Double,
+    val candidateBrierScore: Double
+) {
+    val logLossDelta: Double get() = candidateLogLoss - baselineLogLoss
+    val brierDelta: Double get() = candidateBrierScore - baselineBrierScore
+}
+
+data class FeatureEffectResult(
+    val factorName: String,
+    val baselineCandidateName: String,
+    val candidateName: String,
+    val presetName: String,
+    val folds: List<FeatureEffectFold>,
+    val baselineMeanLogLoss: Double,
+    val candidateMeanLogLoss: Double,
+    val baselineMeanBrierScore: Double,
+    val candidateMeanBrierScore: Double,
+    /** Both metrics must stay within tolerance on every interval; one average metric must improve meaningfully. */
+    val passesNoWorseGate: Boolean
+) {
+    val meanLogLossDelta: Double get() = candidateMeanLogLoss - baselineMeanLogLoss
+    val meanBrierDelta: Double get() = candidateMeanBrierScore - baselineMeanBrierScore
+}
 
 internal data class PreparedModelSample(
     val matchId: Long,
@@ -107,26 +143,29 @@ internal data class ModelFeaturePreparation(
  * Walk-forward model selection with a separate final chronological holdout.
  *
  * 1. Match features are always frozen before outcomes from that date are applied.
- * 2. Six feature/hyperparameter configurations are ranked across three successive
- *    validation intervals. The last 15% of unique dates is never used to select.
- * 3. The selected configuration is compared with Elo on that untouched holdout.
- * 4. Its coefficients are then refitted on the complete eligible history.
- *
- * Model selection uses validation Log Loss (Brier Score breaks ties); the final
- * holdout remains diagnostic and is not used to cherry-pick a configuration.
+ * 2. Feature sets are evaluated on three successive temporal validation intervals.
+ * 3. Form and head-to-head are each subjected to paired ablation tests.
+ * 4. A model is prediction-eligible only when both Log Loss and Brier Score are
+ *    non-worse than Elo on every validation interval, at least one improves on
+ *    average, and any form/H2H feature in it passed its own paired test.
+ * 5. The latest 15% of unique dates remain an untouched diagnostic holdout.
  */
 object ModelTrainer {
     const val MINIMUM_DATED_MATCHES = 20
     const val MINIMUM_DISTINCT_DATES = 20
     private const val K_FACTOR = 32.0
     private const val RECENT_MATCH_WINDOW = 10
+    private const val H2H_PRIOR_MATCHES = 4.0
+    private const val METRIC_NO_WORSE_TOLERANCE = 1e-4
+    private const val MINIMUM_MEAN_METRIC_GAIN = 1e-4
 
     val featureNames: List<String> = listOf(
         "overall_elo_difference",
         "surface_elo_difference",
         "recent_form_difference",
         "experience_difference",
-        "surface_experience_difference"
+        "surface_experience_difference",
+        "head_to_head_difference"
     )
 
     private data class FeatureProfile(val name: String, val indices: List<Int>)
@@ -147,7 +186,12 @@ object ModelTrainer {
     private val featureProfiles = listOf(
         FeatureProfile("Elo only", listOf(0)),
         FeatureProfile("Elo + surface Elo", listOf(0, 1)),
-        FeatureProfile("All 5 features", listOf(0, 1, 2, 3, 4))
+        FeatureProfile("Elo + recent form", listOf(0, 2)),
+        FeatureProfile("Elo + surface Elo + recent form", listOf(0, 1, 2)),
+        FeatureProfile("Elo + surface Elo + head-to-head", listOf(0, 1, 5)),
+        FeatureProfile("Elo + surface Elo + recent form + head-to-head", listOf(0, 1, 2, 5)),
+        FeatureProfile("All 5 features", listOf(0, 1, 2, 3, 4)),
+        FeatureProfile("All 5 features + head-to-head", listOf(0, 1, 2, 3, 4, 5))
     )
 
     private val trainingPresets = listOf(
@@ -237,12 +281,26 @@ object ModelTrainer {
             }
         }
 
-        val rankedCandidates = candidates.sortedWith(
+        // The factor ablations use identical temporal folds and optimization presets,
+        // so each delta is a paired comparison rather than a comparison across different periods.
+        val featureEffects = evaluateFeatureEffects(candidates)
+        val annotatedCandidates = candidates.map { candidate ->
+            val eloGate = passesEloTemporalGate(candidate)
+            val evidenceGate = passesFeatureEvidence(candidate, featureEffects)
+            candidate.copy(
+                passesEloTemporalGate = eloGate,
+                featureEvidencePassed = evidenceGate,
+                eligibleForPrediction = eloGate && evidenceGate
+            )
+        }
+        val rankedCandidates = annotatedCandidates.sortedWith(
             compareBy<ModelCandidateResult> { it.meanLogLoss }
                 .thenBy { it.meanBrierScore }
                 .thenBy { it.iterations }
         )
-        val best = rankedCandidates.first()
+        val diagnosticCandidate = rankedCandidates.first()
+        val acceptedCandidate = rankedCandidates.firstOrNull { it.eligibleForPrediction }
+        val reportCandidate = acceptedCandidate ?: diagnosticCandidate
         val validationEloMeanLogLoss = foldData.indices.map { foldIndex ->
             val test = foldData[foldIndex].third
             calculateMetrics(test, test.map { eloProbability(it.eloDifference) }).logLoss
@@ -252,12 +310,17 @@ object ModelTrainer {
             calculateMetrics(test, test.map { eloProbability(it.eloDifference) }).brierScore
         }.average()
 
-        // Require a measurable validation gain before the learned model replaces Elo.
-        // The 1e-4 margin avoids switching based on tiny floating-point differences.
-        val useLogistic = best.meanLogLoss < validationEloMeanLogLoss - 1e-4
+        // A candidate is routed to real-match forecasts only after passing both
+        // metric gates on every independent interval and its own feature ablations.
+        val useLogistic = acceptedCandidate != null
         val selectedSpec = CandidateSpec(
-            FeatureProfile(best.profileName, best.featureIndices),
-            TrainingPreset("selected", best.iterations, best.learningRate, best.l2Strength)
+            FeatureProfile(reportCandidate.profileName, reportCandidate.featureIndices),
+            TrainingPreset(
+                reportCandidate.name.substringAfterLast(" / "),
+                reportCandidate.iterations,
+                reportCandidate.learningRate,
+                reportCandidate.l2Strength
+            )
         )
 
         val finalHoldoutStart = dates[cut85]
@@ -301,14 +364,137 @@ object ModelTrainer {
             logisticMetrics = logisticHoldoutMetrics,
             model = fullHistoryModel,
             candidateResults = rankedCandidates,
-            selectedModelName = if (useLogistic) best.name else "Elo baseline (no CV improvement)",
+            selectedModelName = if (useLogistic) {
+                reportCandidate.name
+            } else {
+                "Elo baseline (no candidate passed all quality gates; diagnostic: ${diagnosticCandidate.name})"
+            },
             validationEloMeanLogLoss = validationEloMeanLogLoss,
             validationEloMeanBrier = validationEloMeanBrier,
-            validationModelMeanLogLoss = best.meanLogLoss,
-            validationModelMeanBrier = best.meanBrierScore,
-            validationFolds = best.folds,
+            validationModelMeanLogLoss = reportCandidate.meanLogLoss,
+            validationModelMeanBrier = reportCandidate.meanBrierScore,
+            validationFolds = reportCandidate.folds,
+            featureEffects = featureEffects,
             logisticSelectedForPrediction = useLogistic
         )
+    }
+
+    private data class FeatureComparisonSpec(
+        val factorName: String,
+        val baselineProfile: String,
+        val candidateProfile: String
+    )
+
+    private fun evaluateFeatureEffects(
+        candidates: List<ModelCandidateResult>
+    ): List<FeatureEffectResult> {
+        val comparisons = listOf(
+            FeatureComparisonSpec("Недавняя форма", "Elo only", "Elo + recent form"),
+            FeatureComparisonSpec(
+                "Недавняя форма",
+                "Elo + surface Elo",
+                "Elo + surface Elo + recent form"
+            ),
+            FeatureComparisonSpec(
+                "Недавняя форма",
+                "Elo + surface Elo + head-to-head",
+                "Elo + surface Elo + recent form + head-to-head"
+            ),
+            FeatureComparisonSpec(
+                "Личные встречи",
+                "Elo + surface Elo",
+                "Elo + surface Elo + head-to-head"
+            ),
+            FeatureComparisonSpec(
+                "Личные встречи",
+                "Elo + surface Elo + recent form",
+                "Elo + surface Elo + recent form + head-to-head"
+            ),
+            FeatureComparisonSpec(
+                "Личные встречи",
+                "All 5 features",
+                "All 5 features + head-to-head"
+            )
+        )
+        val output = mutableListOf<FeatureEffectResult>()
+        for (preset in trainingPresets) {
+            for (comparison in comparisons) {
+                val baselineName = "${comparison.baselineProfile} / ${preset.name}"
+                val candidateName = "${comparison.candidateProfile} / ${preset.name}"
+                val baseline = candidates.firstOrNull { it.name == baselineName } ?: continue
+                val candidate = candidates.firstOrNull { it.name == candidateName } ?: continue
+                val pairedFolds = baseline.folds.zip(candidate.folds).map { (base, added) ->
+                    FeatureEffectFold(
+                        startDate = base.startDate,
+                        endDate = base.endDate,
+                        testMatches = minOf(base.testMatches, added.testMatches),
+                        baselineLogLoss = base.modelMetrics.logLoss,
+                        candidateLogLoss = added.modelMetrics.logLoss,
+                        baselineBrierScore = base.modelMetrics.brierScore,
+                        candidateBrierScore = added.modelMetrics.brierScore
+                    )
+                }
+                val baselineLogLoss = pairedFolds.map { it.baselineLogLoss }.average()
+                val candidateLogLoss = pairedFolds.map { it.candidateLogLoss }.average()
+                val baselineBrier = pairedFolds.map { it.baselineBrierScore }.average()
+                val candidateBrier = pairedFolds.map { it.candidateBrierScore }.average()
+                val noWorseOnEveryFold = pairedFolds.isNotEmpty() && pairedFolds.all {
+                    it.candidateLogLoss <= it.baselineLogLoss + METRIC_NO_WORSE_TOLERANCE &&
+                        it.candidateBrierScore <= it.baselineBrierScore + METRIC_NO_WORSE_TOLERANCE
+                }
+                val meaningfulAverageGain =
+                    candidateLogLoss < baselineLogLoss - MINIMUM_MEAN_METRIC_GAIN ||
+                        candidateBrier < baselineBrier - MINIMUM_MEAN_METRIC_GAIN
+                output += FeatureEffectResult(
+                    factorName = comparison.factorName,
+                    baselineCandidateName = baseline.name,
+                    candidateName = candidate.name,
+                    presetName = preset.name,
+                    folds = pairedFolds,
+                    baselineMeanLogLoss = baselineLogLoss,
+                    candidateMeanLogLoss = candidateLogLoss,
+                    baselineMeanBrierScore = baselineBrier,
+                    candidateMeanBrierScore = candidateBrier,
+                    passesNoWorseGate = noWorseOnEveryFold && meaningfulAverageGain
+                )
+            }
+        }
+        return output
+    }
+
+    private fun passesEloTemporalGate(candidate: ModelCandidateResult): Boolean {
+        if (candidate.folds.isEmpty()) return false
+        val noWorseOnEveryFold = candidate.folds.all {
+            it.modelMetrics.logLoss <= it.eloMetrics.logLoss + METRIC_NO_WORSE_TOLERANCE &&
+                it.modelMetrics.brierScore <= it.eloMetrics.brierScore + METRIC_NO_WORSE_TOLERANCE
+        }
+        val meanEloLogLoss = candidate.folds.map { it.eloMetrics.logLoss }.average()
+        val meanEloBrier = candidate.folds.map { it.eloMetrics.brierScore }.average()
+        val meaningfulAverageGain =
+            candidate.meanLogLoss < meanEloLogLoss - MINIMUM_MEAN_METRIC_GAIN ||
+                candidate.meanBrierScore < meanEloBrier - MINIMUM_MEAN_METRIC_GAIN
+        return noWorseOnEveryFold && meaningfulAverageGain
+    }
+
+    private fun passesFeatureEvidence(
+        candidate: ModelCandidateResult,
+        featureEffects: List<FeatureEffectResult>
+    ): Boolean {
+        val presetName = candidate.name.substringAfterLast(" / ")
+        val usesForm = 2 in candidate.featureIndices
+        val usesHeadToHead = 5 in candidate.featureIndices
+        val formIsJustified = !usesForm || featureEffects.any {
+            it.factorName == "Недавняя форма" &&
+                it.presetName == presetName &&
+                it.passesNoWorseGate
+        }
+        val headToHeadIsJustified = !usesHeadToHead || featureEffects.any {
+            it.factorName == "Личные встречи" &&
+                it.presetName == presetName &&
+                it.candidateName == candidate.name &&
+                it.passesNoWorseGate
+        }
+        return formIsJustified && headToHeadIsJustified
     }
 
     /**
@@ -403,6 +589,7 @@ object ModelTrainer {
         }
 
         val states = mutableMapOf<String, PlayerState>()
+        val headToHeadHistory = mutableMapOf<Pair<String, String>, HeadToHeadState>()
         val samples = mutableListOf<PreparedModelSample>()
         val matchesByDate = dated.sortedWith(compareBy<DatedMatch> { it.date }.thenBy { it.id })
             .groupBy { it.date }.toSortedMap()
@@ -425,6 +612,12 @@ object ModelTrainer {
                     val countB = stateB.surfaceMatches.getOrDefault(trackedSurface, 0)
                     (ln(1.0 + countA) - ln(1.0 + countB)) / 4.0
                 }
+                val priorMeetings = headToHeadHistory[match.keyA to match.keyB]
+                // Shrink a small H2H sample toward neutral: two prior meetings 2–0
+                // contribute 2 / (2 + 4) = 0.333 rather than a full-strength signal.
+                val headToHeadDifference = priorMeetings?.let {
+                    (it.winsA - it.winsB).toDouble() / (it.winsA + it.winsB + H2H_PRIOR_MATCHES)
+                } ?: 0.0
                 samples += PreparedModelSample(
                     matchId = match.id,
                     date = date,
@@ -433,7 +626,8 @@ object ModelTrainer {
                         surfaceDifference / 400.0,
                         formDifference,
                         experienceDifference,
-                        surfaceExperienceDifference
+                        surfaceExperienceDifference,
+                        headToHeadDifference
                     ),
                     label = if (match.winnerKey == match.keyA) 1 else 0,
                     eloDifference = overallDifference
@@ -483,6 +677,14 @@ object ModelTrainer {
                 val aWon = match.winnerKey == match.keyA
                 addRecentResult(stateA, if (aWon) 1 else 0)
                 addRecentResult(stateB, if (aWon) 0 else 1)
+            }
+
+            // Apply H2H outcomes only after every match from this date has frozen
+            // its features. This prevents a same-date result from leaking into another row.
+            dayMatches.forEach { match ->
+                val pair = match.keyA to match.keyB
+                val h2h = headToHeadHistory.getOrPut(pair) { HeadToHeadState() }
+                if (match.winnerKey == match.keyA) h2h.winsA++ else h2h.winsB++
             }
         }
 
@@ -586,6 +788,11 @@ object ModelTrainer {
         val keyB: String,
         val winnerKey: String,
         val surface: Surface
+    )
+
+    private class HeadToHeadState(
+        var winsA: Int = 0,
+        var winsB: Int = 0
     )
 
     private class PlayerState {
