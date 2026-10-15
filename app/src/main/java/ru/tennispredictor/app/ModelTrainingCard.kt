@@ -45,8 +45,10 @@ fun ModelTrainingCard(
         ) {
             Text(message, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Сравниваются 3 набора признаков и 2 конфигурации оптимизации. " +
-                    "Выбор делается по трём последовательным временным интервалам; последние 15% дат — отдельная финальная проверка."
+                "Сравниваются 8 наборов признаков и 2 конфигурации обучения. " +
+                    "Недавняя форма и личные встречи проходят отдельные парные проверки. " +
+                    "Кандидат допускается к прогнозам только если Log Loss и Brier не ухудшаются на каждом из трёх временных интервалов относительно Elo, " +
+                    "а новые факторы доказали полезность. Последние 15% дат — отдельная финальная проверка."
             )
             if (matches.size < ModelTrainer.MINIMUM_DATED_MATCHES) {
                 Text("Матчей импортировано: ${matches.size}. Для обучения требуется минимум ${ModelTrainer.MINIMUM_DATED_MATCHES} корректных датированных матчей.")
@@ -96,6 +98,40 @@ fun ModelTrainingCard(
                 }
 
                 HorizontalDivider()
+                Text("Полезность новых факторов: парные проверки", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Δ = метрика с фактором минус метрика без него; отрицательная разница лучше. " +
+                        "Фактор проходит проверку, если ни в одном из трёх интервалов не ухудшены обе метрики более чем на 0,0001, " +
+                        "и хотя бы одна средняя метрика улучшилась минимум на 0,0001.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                r.featureEffects.forEach { effect ->
+                    HorizontalDivider()
+                    Text(
+                        "${effect.factorName} · ${effect.candidateName}",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "База: ${effect.baselineCandidateName}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Средняя Δ Log Loss: ${signedMetric(effect.meanLogLossDelta)} · " +
+                            "Δ Brier: ${signedMetric(effect.meanBrierDelta)} · " +
+                            if (effect.passesNoWorseGate) "фактор подтверждён" else "фактор не подтверждён",
+                        color = if (effect.passesNoWorseGate) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "По интервалам Log Loss: " +
+                            effect.folds.joinToString(" / ") { signedMetric(it.logLossDelta) } +
+                            "; Brier: " +
+                            effect.folds.joinToString(" / ") { signedMetric(it.brierDelta) },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                HorizontalDivider()
                 Text("Сравнение вариантов", fontWeight = FontWeight.SemiBold)
                 r.candidateResults.forEachIndexed { index, candidate ->
                     Text(
@@ -108,6 +144,17 @@ fun ModelTrainingCard(
                             "шаг: ${candidate.learningRate}; L2: ${candidate.l2Strength}. " +
                             "Средние Log Loss/Brier: ${fmt(candidate.meanLogLoss)} / ${fmt(candidate.meanBrierScore)}",
                         style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        when {
+                            candidate.eligibleForPrediction -> "Допущен к прогнозам: оба quality gate пройдены"
+                            !candidate.passesEloTemporalGate -> "Не допущен: Log Loss/Brier не прошли проверку против Elo на всех интервалах"
+                            !candidate.featureEvidencePassed -> "Не допущен: форма или личные встречи не прошли отдельную проверку"
+                            else -> "Не допущен к прогнозам"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (candidate.eligibleForPrediction) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Text(
@@ -160,3 +207,6 @@ private fun MetricLine(title: String, elo: Double, logistic: Double) {
 }
 
 private fun fmt(value: Double): String = String.format(Locale.ROOT, "%.4f", value)
+
+private fun signedMetric(value: Double): String =
+    String.format(Locale.ROOT, "%+.4f", value)
