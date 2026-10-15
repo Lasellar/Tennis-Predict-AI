@@ -23,11 +23,26 @@ class ModelTrainerTest {
         assertTrue(report.logisticMetrics.brierScore in 0.0..1.0)
         assertEquals(report.model.featureIndices.size + 1, report.model.weights.size)
         assertTrue(report.model.weights.all { it.isFinite() })
-        assertEquals(6, report.candidateResults.size)
+        assertEquals(20, report.candidateResults.size)
         assertEquals(3, report.candidateResults.first().folds.size)
+        assertEquals(18, report.featureEffects.size)
+        assertTrue(report.featureEffects.all { it.folds.size == 3 })
+        assertTrue(report.featureEffects.any { it.factorName == "Недавняя форма" })
+        assertTrue(report.featureEffects.any { it.factorName == "Личные встречи" })
         assertTrue(report.candidateResults.zipWithNext().all { (a, b) ->
             a.meanLogLoss <= b.meanLogLoss + 1e-12
         })
+        assertTrue(report.candidateResults.all { candidate ->
+            candidate.eligibleForPrediction ==
+                (candidate.passesEloTemporalGate && candidate.featureEvidencePassed)
+        })
+        assertEquals(
+            report.logisticSelectedForPrediction,
+            report.candidateResults.any { it.eligibleForPrediction }
+        )
+        assertEquals(report.logisticSelectedForPrediction, report.model.recommendedForPrediction)
+        assertEquals(2, report.featureEffects.map { it.presetName }.distinct().size)
+        assertTrue(report.featureEffects.groupBy { it.presetName }.values.all { it.size == 9 })
     }
 
     @Test
@@ -89,8 +104,28 @@ class ModelTrainerTest {
 
         val samples = ModelTrainer.prepareSamples(history).samples
         assertEquals(2, samples.size)
-        val emptyHistoryFeatures = doubleArrayOf(0.0, 0.0, 0.0, 0.0, 0.0)
+        val emptyHistoryFeatures = doubleArrayOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         samples.forEach { assertArrayEquals(emptyHistoryFeatures, it.features, 1e-9) }
+    }
+
+    @Test
+    fun headToHeadFeatureIsSmoothedAndUsesOnlyEarlierDates() {
+        val sameDay = "2024-01-01"
+        val nextDay = "2024-01-02"
+        val history = listOf(
+            StoredMatch(1, MatchRecord("A", "B", "A", Surface.HARD, date = sameDay)),
+            StoredMatch(2, MatchRecord("B", "A", "A", Surface.HARD, date = sameDay)),
+            StoredMatch(3, MatchRecord("A", "B", "B", Surface.HARD, date = nextDay))
+        )
+
+        val samples = ModelTrainer.prepareSamples(history).samples
+        assertEquals(3, samples.size)
+        // Both same-day samples must ignore each other's outcomes.
+        assertEquals(0.0, samples[0].features[5], 1e-12)
+        assertEquals(0.0, samples[1].features[5], 1e-12)
+        // Two earlier wins for canonical player A produce a shrunk 2 / (2 + 4) signal.
+        assertEquals(1.0 / 3.0, samples[2].features[5], 1e-12)
+        assertEquals(0, samples[2].label)
     }
 
     @Test

@@ -491,7 +491,7 @@ private fun ForecastExplanationCard(item: MatchForecast) {
                 if (trainedModelUsed) {
                     "Использована обученная логистическая регрессия. Ниже — факторы, которые входят в выбранный профиль."
                 } else {
-                    "Использован базовый Elo с поправками на покрытие и недавние результаты. Поправки зависят от объёма доступной истории."
+                    "Использован проверенный Elo baseline. Форма, покрытие и личные встречи остаются справочной статистикой, пока модель не докажет улучшение Log Loss и Brier Score."
                 },
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -543,6 +543,13 @@ private fun ForecastExplanationCard(item: MatchForecast) {
                     detail = "Количество матчей на выбранном покрытии входит в модель как отдельный признак."
                 )
             }
+            if (trainedModelUsed && 5 in indices) {
+                InsightRow(
+                    title = "Личные встречи в модели",
+                    value = "${item.headToHead.winsA}–${item.headToHead.winsB}",
+                    detail = "Используется сглаженное преимущество по H2H; небольшая выборка автоматически приближается к нейтральному значению."
+                )
+            }
             if (trainedModelUsed) {
                 Text(
                     "Признаки активного профиля: " +
@@ -552,7 +559,11 @@ private fun ForecastExplanationCard(item: MatchForecast) {
                 )
             }
             Text(
-                "Личные встречи показаны отдельно для контекста и напрямую не меняют рассчитанную вероятность.",
+                if (trainedModelUsed && 5 in indices) {
+                    "История личных встреч входит в вероятность как отдельный признак: она прошла парную проверку на независимых временных интервалах."
+                } else {
+                    "Личные встречи показаны для контекста и не меняют вероятность в текущем профиле."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -682,6 +693,7 @@ private fun modelFeatureLabel(index: Int): String = when (index) {
     2 -> "недавняя форма"
     3 -> "общий опыт"
     4 -> "опыт на покрытии"
+    5 -> "сглаженная история личных встреч"
     else -> "признак $index"
 }
 
