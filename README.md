@@ -11,7 +11,15 @@ Android MVP for estimating tennis match win probabilities from historical result
 - Increased the model feature version to 3 so coefficients from the previous five-feature model are invalidated and must be retrained.
 - Added a reproducible Python/NumPy benchmark and GitHub Actions workflow. The workflow uploads only the metrics report, not the third-party match archive.
 
-The initial reference replay of ATP results from 2010–2024 showed incremental gains from form and H2H compared with matched logistic-regression profiles, but the tested logistic candidates still failed the stricter Elo comparison on at least one validation interval. Consequently, version 0.6 deliberately keeps Elo as the active prediction baseline until a candidate demonstrates a robust improvement.
+The reference replay of the ATP archive (2010–2024) contains roughly 42.5k valid dated matches and 690 tournament dates. Across three chronological validation windows, adding recent form improved the paired profile's mean Log Loss by about 0.0014 and Brier Score by 0.0006 when added to Elo plus surface Elo. Adding H2H to the same profile improved the mean metrics by about 0.00043 and 0.00019; adding H2H to the full five-feature profile improved them by about 0.00039 and 0.00017. These are incremental improvements against matched logistic models, not proof that logistic regression is better than Elo. No tested candidate passed both Log Loss and Brier gates against the Elo baseline on all three intervals, so version 0.6 deliberately keeps Elo as the active prediction baseline.
+
+To reproduce the feature analysis locally, download the ATP CSV archive and run the NumPy-based benchmark:
+
+    python3 -m pip install numpy
+    python3 scripts/download_atp_archive.py --start 2010 --end 2024 --output data/benchmark/atp_2010_2024.csv
+    python3 scripts/benchmark_feature_ablation.py --input data/benchmark/atp_2010_2024.csv --output benchmarks/feature_ablation_atp_2010_2024.md --json-output benchmarks/feature_ablation_atp_2010_2024.json
+
+The GitHub Actions workflow named “ATP feature ablation benchmark” performs the same replay and publishes the Markdown and JSON reports as a workflow artifact. It does not package or commit the downloaded source archive.
 
 ## Version 0.5.2
 
