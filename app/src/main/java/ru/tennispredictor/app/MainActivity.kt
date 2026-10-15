@@ -760,18 +760,7 @@ private fun PlayerNameField(
     var expanded by remember { mutableStateOf(false) }
     val query = value.trim()
     val suggestions = remember(query, playerNames) {
-        if (query.length < 2 || playerNames.any { it.equals(query, ignoreCase = true) }) {
-            emptyList()
-        } else {
-            playerNames.asSequence()
-                .filter { it.contains(query, ignoreCase = true) }
-                .sortedWith(
-                    compareBy<String> { !it.startsWith(query, ignoreCase = true) }
-                        .thenBy { it.lowercase(Locale.ROOT) }
-                )
-                .take(500)
-                .toList()
-        }
+        findPlayerSuggestions(playerNames, query, limit = 8)
     }
 
     Box(Modifier.fillMaxWidth()) {
