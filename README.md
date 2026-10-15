@@ -1,6 +1,17 @@
 # Tennis Predictor AI
 
-Android MVP for estimating tennis match win probabilities from Elo ratings.
+Android MVP for estimating tennis match win probabilities from historical results.
+
+## Version 0.6
+
+- Added a date-safe, smoothed head-to-head (H2H) feature: only prior meetings count, and meetings from the same tournament date cannot leak into feature snapshots.
+- Expanded model selection to 10 feature profiles across two optimization presets, with paired temporal ablations for recent form and H2H.
+- Every candidate is scored on three independent chronological validation intervals. A model may replace Elo only when both Log Loss and Brier Score are non-worse against Elo on every interval (tolerance 0.0001), one mean metric improves by at least 0.0001, and each included form/H2H factor passes its exact-context ablation.
+- If no candidate clears every gate, the real-match forecast uses the pure overall-Elo baseline. Surface, recent form and H2H remain visible as evidence rather than unvalidated hand-tuned probability adjustments.
+- Increased the model feature version to 3 so coefficients from the previous five-feature model are invalidated and must be retrained.
+- Added a reproducible Python/NumPy benchmark and GitHub Actions workflow. The workflow uploads only the metrics report, not the third-party match archive.
+
+The initial reference replay of ATP results from 2010–2024 showed incremental gains from form and H2H compared with matched logistic-regression profiles, but the tested logistic candidates still failed the stricter Elo comparison on at least one validation interval. Consequently, version 0.6 deliberately keeps Elo as the active prediction baseline until a candidate demonstrates a robust improvement.
 
 ## Version 0.5.2
 
