@@ -53,10 +53,17 @@ object RatingCalculator {
         private val clayStats = linkedMapOf<String, MutableStats>()
         private val grassStats = linkedMapOf<String, MutableStats>()
 
-        fun add(record: MatchRecord) {
-            val playerA = record.playerA.trim()
-            val playerB = record.playerB.trim()
-            val winner = record.winner.trim()
+        fun add(record: MatchRecord) = add(
+            record.playerA,
+            record.playerB,
+            record.winner,
+            record.surface
+        )
+
+        fun add(rawPlayerA: String, rawPlayerB: String, rawWinner: String, surface: Surface) {
+            val playerA = rawPlayerA.trim()
+            val playerB = rawPlayerB.trim()
+            val winner = rawWinner.trim()
             if (playerA.isBlank() || playerB.isBlank() ||
                 playerA.equals(playerB, ignoreCase = true) ||
                 (winner != playerA && winner != playerB)
@@ -65,7 +72,7 @@ object RatingCalculator {
             updateElo(overallRatings, playerA, playerB, winner)
             updateStats(overallStats, playerA, playerB, winner)
 
-            when (record.surface) {
+            when (surface) {
                 Surface.HARD -> {
                     updateElo(hardRatings, playerA, playerB, winner)
                     updateStats(hardStats, playerA, playerB, winner)
