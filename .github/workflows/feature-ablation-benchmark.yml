@@ -1,0 +1,42 @@
+name: ATP feature ablation benchmark
+
+on:
+  push:
+    branches: [work/**]
+    paths:
+      - "scripts/benchmark_feature_ablation.py"
+      - ".github/workflows/feature-ablation-benchmark.yml"
+      - "scripts/download_atp_archive.py"
+      - "scripts/download_tour_archives.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install benchmark dependency
+        run: python -m pip install --upgrade numpy
+      - name: Download non-redistributed ATP history
+        run: python scripts/download_atp_archive.py --start 2010 --end 2024 --output data/benchmark/atp_2010_2024.csv
+      - name: Replay temporal feature ablations
+        run: |
+          mkdir -p dist
+          python scripts/benchmark_feature_ablation.py --input data/benchmark/atp_2010_2024.csv --output dist/feature_ablation_atp_2010_2024.md --json-output dist/feature_ablation_atp_2010_2024.json
+      - name: Upload metrics report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: tennis-predict-v0.6-feature-ablation-report
+          path: |
+            dist/feature_ablation_atp_2010_2024.md
+            dist/feature_ablation_atp_2010_2024.json
+          if-no-files-found: error
+          retention-days: 90
