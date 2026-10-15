@@ -226,13 +226,10 @@ object MatchPredictionEngine {
         // Stream over the ordered history. Only the two requested players retain
         // bounded recent-form buffers; storing every player's complete match list
         // created hundreds of thousands of temporary objects for large archives.
-        orderedHistory
-            .filter { stored ->
-                val parsed = parseDate(stored.record.date)
-                parsed == null || parsed.isBefore(cutoff)
-            }
-            .forEach { stored ->
+        orderedHistory.forEach { stored ->
                 val record = stored.record
+                val parsedRecordDate = parseDate(record.date)
+                if (parsedRecordDate != null && !parsedRecordDate.isBefore(cutoff)) return@forEach
                 val recordA = normalizeName(record.playerA)
                 val recordB = normalizeName(record.playerB)
                 val winner = normalizeName(record.winner)
@@ -270,7 +267,7 @@ object MatchPredictionEngine {
                 stateA.surfaceMatchCounts[record.surface] = stateA.surfaceMatchCounts.getOrDefault(record.surface, 0) + 1
                 stateB.surfaceMatchCounts[record.surface] = stateB.surfaceMatchCounts.getOrDefault(record.surface, 0) + 1
 
-                if (parseDate(record.date) == null) {
+                if (parsedRecordDate == null) {
                     stateA.undatedMatches++
                     stateB.undatedMatches++
                 } else {
@@ -456,18 +453,22 @@ object MatchPredictionEngine {
     private fun parseDate(value: String): LocalDate? {
         val trimmed = value.trim()
         if (trimmed.isBlank()) return null
-        return runCatching {
-            if (trimmed.matches(Regex("\\d{8}"))) {
+        return try {
+            if (trimmed.length == 8 && trimmed.all(Char::isDigit)) {
                 LocalDate.parse(trimmed, DateTimeFormatter.BASIC_ISO_DATE)
             } else {
                 LocalDate.parse(trimmed.take(10))
             }
-        }.getOrNull()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun normalizeName(value: String): String =
         collapseWhitespace(value).lowercase(Locale.ROOT)
 
     private fun collapseWhitespace(value: String): String =
-        value.trim().replace(Regex("\\s+"), " ")
+        value.trim().replace(WHITESPACE_PATTERN, " ")
+
+    private val WHITESPACE_PATTERN = Regex("\\s+")
 }
