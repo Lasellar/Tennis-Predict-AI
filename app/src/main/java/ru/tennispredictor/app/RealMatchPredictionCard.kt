@@ -41,7 +41,8 @@ import kotlin.math.roundToInt
 
 @Composable
 fun RealMatchPredictionCard(
-    matches: List<StoredMatch>,
+    matchCount: Int,
+    playerNames: List<String>,
     database: MatchDatabase,
     model: LogisticRegressionModel?
 ) {
@@ -58,11 +59,11 @@ fun RealMatchPredictionCard(
     var forecast by remember { mutableStateOf<MatchForecast?>(null) }
     var savedPredictions by remember { mutableStateOf<List<SavedPrediction>>(emptyList()) }
 
-    val players = remember(matches) { MatchPredictionEngine.availablePlayers(matches) }
+    val players = remember(playerNames) { playerNames }
 
-    LaunchedEffect(matches, model) {
+    LaunchedEffect(database) {
         savedPredictions = withContext(Dispatchers.IO) {
-            database.reconcileSavedPredictions(matches)
+            database.reconcileSavedPredictions()
             database.loadSavedPredictions()
         }
     }
@@ -180,9 +181,12 @@ fun RealMatchPredictionCard(
                                 messageIsError = false
                                 scope.launch {
                                     try {
+                                        val history = withContext(Dispatchers.IO) {
+                                            database.loadMatches()
+                                        }
                                         val result = withContext(Dispatchers.Default) {
                                             MatchPredictionEngine.calculate(
-                                                history = matches,
+                                                history = history,
                                                 playerA = playerA.trim(),
                                                 playerB = playerB.trim(),
                                                 surface = selectedSurface,
