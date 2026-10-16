@@ -72,11 +72,14 @@ private fun PredictorScreen() {
         ?: operationWorkInfos.lastOrNull()
     val operationInProgress = operationWorkInfo?.state?.isFinished == false
     val operationType = when {
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_RESTORE) == true -> BackgroundOperationWorker.OP_RESTORE
         operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_IMPORT) == true -> BackgroundOperationWorker.OP_IMPORT
         operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_TRAIN) == true -> BackgroundOperationWorker.OP_TRAIN
         else -> null
     }
+    val isRestoring = operationInProgress && operationType == BackgroundOperationWorker.OP_RESTORE
     val isImporting = operationInProgress && operationType == BackgroundOperationWorker.OP_IMPORT
+    val showHistoryProgress = isImporting || isRestoring
     val importProgress = if (isImporting) {
         operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0) ?: 0
     } else 0
@@ -124,6 +127,23 @@ private fun PredictorScreen() {
             HistorySummaryCache.getOrLoadPlayerNames { database.loadPlayerNames() }
         }
         trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
+
+        // Create a shared-storage backup once for existing installations. On a fresh
+        // install, automatically queue restoration if the previous install left a backup.
+        if (MatchHistoryBackup.isSupported()) {
+            if (summary.matchCount > 0) {
+                withContext(Dispatchers.IO) {
+                    if (MatchHistoryBackup.findBackup(context) == null) {
+                        runCatching { MatchHistoryBackup.writeBackup(context, database) }
+                    }
+                }
+            } else {
+                val backupUri = withContext(Dispatchers.IO) {
+                    MatchHistoryBackup.findBackup(context)
+                }
+                if (backupUri != null) BackgroundOperations.enqueueRestore(context, backupUri)
+            }
+        }
     }
 
     LaunchedEffect(operationWorkInfo?.id, operationWorkInfo?.state) {
@@ -570,13 +590,14 @@ private fun PredictorScreen() {
                         ) {
                             Text(
                                 when {
+                                    isRestoring -> "Восстанавливаем историю… $importProgress%"
                                     isImporting -> "Импортируем… $importProgress%"
                                     operationInProgress -> "Выполняется другая задача…"
                                     else -> "Выбрать CSV-файлы"
                                 }
                             )
                         }
-                        if (isImporting) {
+                        if (showHistoryProgress) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -607,6 +628,11 @@ private fun PredictorScreen() {
                         Text(
                             "Поддерживаются player_a, player_b, winner, surface, date; а также ATP/WTA-архивы с winner_name, loser_name, surface и tourney_date. Даты и поверхность можно не указывать.",
                             style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "История автоматически сохраняется в Downloads/TennisPredict и восстановится после переустановки приложения.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
