@@ -20,7 +20,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.getWorkInfosForUniqueWorkFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,7 +44,11 @@ fun ModelTrainingCard(
     val operationWorkInfo = operationWorkInfos.firstOrNull { !it.state.isFinished }
         ?: operationWorkInfos.lastOrNull()
     val operationInProgress = operationWorkInfo?.state?.isFinished == false
-    val operationType = operationWorkInfo?.inputData?.getString(BackgroundOperationWorker.KEY_OPERATION)
+    val operationType = when {
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_IMPORT) == true -> BackgroundOperationWorker.OP_IMPORT
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_TRAIN) == true -> BackgroundOperationWorker.OP_TRAIN
+        else -> null
+    }
     val busy = operationInProgress && operationType == BackgroundOperationWorker.OP_TRAIN
     val trainingProgress = if (busy) {
         operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0) ?: 0
@@ -56,9 +59,14 @@ fun ModelTrainingCard(
     var message by remember { mutableStateOf("Сравним варианты по историческим результатам") }
     var report by remember { mutableStateOf(BackgroundOperationResults.latestTrainingReport) }
 
-    LaunchedEffect(operationWorkInfo?.id, operationWorkInfo?.state) {
+    LaunchedEffect(
+        operationWorkInfo?.id,
+        operationWorkInfo?.state,
+        operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0),
+        operationWorkInfo?.progress?.getString(BackgroundOperationWorker.KEY_STATUS)
+    ) {
         val info = operationWorkInfo ?: return@LaunchedEffect
-        if (info.inputData.getString(BackgroundOperationWorker.KEY_OPERATION) != BackgroundOperationWorker.OP_TRAIN) {
+        if (!info.tags.contains(BackgroundOperationWorker.TAG_TRAIN)) {
             return@LaunchedEffect
         }
         when (info.state) {
