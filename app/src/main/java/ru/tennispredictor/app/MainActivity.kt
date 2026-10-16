@@ -80,7 +80,7 @@ private fun PredictorScreen() {
     val isRestoring = operationInProgress && operationType == BackgroundOperationWorker.OP_RESTORE
     val isImporting = operationInProgress && operationType == BackgroundOperationWorker.OP_IMPORT
     val showHistoryProgress = isImporting || isRestoring
-    val importProgress = if (isImporting) {
+    val importProgress = if (showHistoryProgress) {
         operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0) ?: 0
     } else 0
     val importProgressStatus = operationWorkInfo?.progress?.getString(BackgroundOperationWorker.KEY_STATUS)
