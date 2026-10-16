@@ -254,10 +254,12 @@ class BackgroundOperationWorker(
             report(94, "Обновление результатов сохранённых прогнозов")
             database.reconcileSavedPredictions()
             if (!restoringBackup) {
+                if (MatchHistoryBackup.isSupported()) {
                 report(96, "Создание резервной копии истории")
                 MatchHistoryBackup.writeBackup(applicationContext, database) { percentage ->
                     report(96 + percentage * 3 / 100, "Сохранение резервной копии в Downloads/TennisPredict")
                 }
+            }
             }
             inserted
         }
@@ -268,7 +270,13 @@ class BackgroundOperationWorker(
             } else {
                 append("Обработано CSV: $filesWithMatches/$totalFiles. ")
                 append("Добавлено матчей: ${saved.inserted}; повторов пропущено: ${saved.duplicates}.")
-                append(" Резервная копия сохранена в Downloads/TennisPredict.")
+                append(
+                    if (MatchHistoryBackup.isSupported()) {
+                        " Резервная копия сохранена в Downloads/TennisPredict."
+                    } else {
+                        " Системное резервное копирование Android также включено."
+                    }
+                )
             }
             if (invalidRows > 0) append(" Ошибочных строк: $invalidRows.")
             if (parseIssues.isNotEmpty()) append(" Пример ошибки строки: ${parseIssues.first()}.")
