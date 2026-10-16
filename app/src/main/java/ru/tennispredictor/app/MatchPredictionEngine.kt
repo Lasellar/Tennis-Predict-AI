@@ -143,14 +143,18 @@ object MatchPredictionEngine {
     private data class HistoricalResult(
         val date: String,
         val surface: Surface,
-        val won: Boolean,
-        val opponent: String
+        val won: Boolean
     )
 
     private data class PlayerState(
+        val trackHistory: Boolean,
         var overallElo: Double = DEFAULT_ELO,
         val surfaceElos: MutableMap<Surface, Double> = mutableMapOf(),
-        val results: MutableList<HistoricalResult> = mutableListOf(),
+        var totalMatches: Int = 0,
+        val surfaceMatchCounts: MutableMap<Surface, Int>? = if (trackHistory) mutableMapOf() else null,
+        val recentResults: MutableList<HistoricalResult>? = if (trackHistory) mutableListOf() else null,
+        val recentResultsBySurface: MutableMap<Surface, MutableList<HistoricalResult>>? =
+            if (trackHistory) mutableMapOf() else null,
         var lastMatchDate: String = "",
         var undatedMatches: Int = 0
     )
@@ -175,7 +179,8 @@ object MatchPredictionEngine {
         playerB: String,
         surface: Surface,
         matchDate: String,
-        model: LogisticRegressionModel? = null
+        model: LogisticRegressionModel? = null,
+        historyAlreadyOrdered: Boolean = false
     ): MatchForecast {
         val cleanA = collapseWhitespace(playerA)
         val cleanB = collapseWhitespace(playerB)
@@ -187,90 +192,116 @@ object MatchPredictionEngine {
             "Выбери конкретное покрытие корта."
         }
 
-        // Never let a match on the prediction date (or a later date) leak into the forecast.
-        val relevant = history.filter { stored ->
-            val parsed = parseDate(stored.record.date)
-            parsed == null || parsed.isBefore(cutoff)
+        val keyA = normalizeName(cleanA)
+        val keyB = normalizeName(cleanB)
+
+        // Compute date coverage once. The old implementation parsed every date
+        // repeatedly while filtering, sorting, and validating the model.
+        var hasOnlyDatedMatches = true
+        var latestHistoryDate: LocalDate? = null
+        history.forEach { stored ->
+            val date = parseDate(stored.record.date)
+            if (date == null) {
+                hasOnlyDatedMatches = false
+            } else {
+                val currentLatest = latestHistoryDate
+                if (currentLatest == null || date.isAfter(currentLatest)) latestHistoryDate = date
+            }
         }
-        val ordered = if (history.all { parseDate(it.record.date) != null }) {
-            relevant.sortedWith(compareBy<StoredMatch> { parseDate(it.record.date) }.thenBy { it.id })
-        } else {
-            // The project import policy preserves insertion order when dates are mixed/missing.
-            relevant.sortedBy { it.id }
+
+        // MatchDatabase already orders its cursor by date/id when all dates are
+        // available, and by id when any date is missing. Keep a general fallback
+        // for callers/tests that pass unsorted lists directly.
+        val orderedHistory = when {
+            historyAlreadyOrdered && hasOnlyDatedMatches -> history.asSequence()
+            hasOnlyDatedMatches -> history.sortedWith(
+                compareBy<StoredMatch> { it.record.date }.thenBy { it.id }
+            ).asSequence()
+            else -> history.sortedBy { it.id }.asSequence()
         }
 
         val states = mutableMapOf<String, PlayerState>()
-        val displayNames = linkedMapOf<String, String>()
-        val validMatches = ordered.mapNotNull { stored ->
-            val record = stored.record
-            val a = normalizeName(record.playerA)
-            val b = normalizeName(record.playerB)
-            val winner = normalizeName(record.winner)
-            if (a.isBlank() || b.isBlank() || a == b || (winner != a && winner != b)) {
-                null
-            } else {
-                if (!displayNames.containsKey(a)) displayNames[a] = collapseWhitespace(record.playerA)
-                if (!displayNames.containsKey(b)) displayNames[b] = collapseWhitespace(record.playerB)
-                Triple(stored, a, b)
+        var displayNameA: String? = null
+        var displayNameB: String? = null
+        val headToHeadMatches = mutableListOf<HeadToHeadMatch>()
+
+        // Stream over the ordered history. Only the two requested players retain
+        // bounded recent-form buffers; storing every player's complete match list
+        // created hundreds of thousands of temporary objects for large archives.
+        orderedHistory.forEach { stored ->
+                val record = stored.record
+                val parsedRecordDate = parseDate(record.date)
+                if (parsedRecordDate != null && !parsedRecordDate.isBefore(cutoff)) return@forEach
+                val recordA = normalizeName(record.playerA)
+                val recordB = normalizeName(record.playerB)
+                val winner = normalizeName(record.winner)
+                if (recordA.isBlank() || recordB.isBlank() || recordA == recordB ||
+                    (winner != recordA && winner != recordB)
+                ) return@forEach
+
+                if (recordA == keyA && displayNameA == null) displayNameA = collapseWhitespace(record.playerA)
+                if (recordB == keyA && displayNameA == null) displayNameA = collapseWhitespace(record.playerB)
+                if (recordA == keyB && displayNameB == null) displayNameB = collapseWhitespace(record.playerA)
+                if (recordB == keyB && displayNameB == null) displayNameB = collapseWhitespace(record.playerB)
+
+                val stateA = states.getOrPut(recordA) {
+                    PlayerState(trackHistory = recordA == keyA || recordA == keyB)
+                }
+                val stateB = states.getOrPut(recordB) {
+                    PlayerState(trackHistory = recordB == keyA || recordB == keyB)
+                }
+                val aWon = winner == recordA
+
+                val ratingA = stateA.overallElo
+                val ratingB = stateB.overallElo
+                val delta = K_FACTOR * ((if (aWon) 1.0 else 0.0) - TennisPredictor.probability(ratingA, ratingB))
+                stateA.overallElo = ratingA + delta
+                stateB.overallElo = ratingB - delta
+
+                if (record.surface != Surface.OTHER) {
+                    val surfaceA = stateA.surfaceElos.getOrDefault(record.surface, DEFAULT_ELO)
+                    val surfaceB = stateB.surfaceElos.getOrDefault(record.surface, DEFAULT_ELO)
+                    val surfaceDelta = K_FACTOR * ((if (aWon) 1.0 else 0.0) - TennisPredictor.probability(surfaceA, surfaceB))
+                    stateA.surfaceElos[record.surface] = surfaceA + surfaceDelta
+                    stateB.surfaceElos[record.surface] = surfaceB - surfaceDelta
+                }
+
+                if (stateA.trackHistory) {
+                    stateA.totalMatches++
+                    val counts = requireNotNull(stateA.surfaceMatchCounts)
+                    counts[record.surface] = counts.getOrDefault(record.surface, 0) + 1
+                    if (parsedRecordDate == null) stateA.undatedMatches++
+                    else stateA.lastMatchDate = record.date
+                    addRecentResult(stateA, HistoricalResult(record.date, record.surface, aWon))
+                }
+                if (stateB.trackHistory) {
+                    stateB.totalMatches++
+                    val counts = requireNotNull(stateB.surfaceMatchCounts)
+                    counts[record.surface] = counts.getOrDefault(record.surface, 0) + 1
+                    if (parsedRecordDate == null) stateB.undatedMatches++
+                    else stateB.lastMatchDate = record.date
+                    addRecentResult(stateB, HistoricalResult(record.date, record.surface, !aWon))
+                }
+
+                val meeting = (recordA == keyA && recordB == keyB) ||
+                    (recordA == keyB && recordB == keyA)
+                if (meeting) {
+                    val winnerIsA = winner == keyA
+                    headToHeadMatches += HeadToHeadMatch(
+                        date = record.date,
+                        surface = record.surface,
+                        winner = if (winnerIsA) cleanA else cleanB,
+                        playerAWon = winnerIsA
+                    )
+                }
             }
-        }
 
-        for ((stored, keyA, keyB) in validMatches) {
-            val record = stored.record
-            val stateA = states.getOrPut(keyA) { PlayerState() }
-            val stateB = states.getOrPut(keyB) { PlayerState() }
-            val aWon = normalizeName(record.winner) == keyA
-            val ratingA = stateA.overallElo
-            val ratingB = stateB.overallElo
-            val delta = K_FACTOR * ((if (aWon) 1.0 else 0.0) - TennisPredictor.probability(ratingA, ratingB))
-            stateA.overallElo = ratingA + delta
-            stateB.overallElo = ratingB - delta
+        val stateA = states[keyA] ?: PlayerState(trackHistory = true)
+        val stateB = states[keyB] ?: PlayerState(trackHistory = true)
+        val evidenceA = evidence(cleanA, stateA, surface, cutoff, displayNameA)
+        val evidenceB = evidence(cleanB, stateB, surface, cutoff, displayNameB)
 
-            if (record.surface != Surface.OTHER) {
-                val surfaceA = stateA.surfaceElos.getOrDefault(record.surface, DEFAULT_ELO)
-                val surfaceB = stateB.surfaceElos.getOrDefault(record.surface, DEFAULT_ELO)
-                val surfaceDelta = K_FACTOR * ((if (aWon) 1.0 else 0.0) - TennisPredictor.probability(surfaceA, surfaceB))
-                stateA.surfaceElos[record.surface] = surfaceA + surfaceDelta
-                stateB.surfaceElos[record.surface] = surfaceB - surfaceDelta
-            }
-
-            val parsedDate = parseDate(record.date)
-            if (parsedDate == null) {
-                stateA.undatedMatches++
-                stateB.undatedMatches++
-            } else {
-                stateA.lastMatchDate = record.date
-                stateB.lastMatchDate = record.date
-            }
-            stateA.results += HistoricalResult(record.date, record.surface, aWon, keyB)
-            stateB.results += HistoricalResult(record.date, record.surface, !aWon, keyA)
-        }
-
-        val keyA = normalizeName(cleanA)
-        val keyB = normalizeName(cleanB)
-        val stateA = states[keyA] ?: PlayerState()
-        val stateB = states[keyB] ?: PlayerState()
-        val evidenceA = evidence(cleanA, stateA, surface, cutoff, displayNames[keyA])
-        val evidenceB = evidence(cleanB, stateB, surface, cutoff, displayNames[keyB])
-
-        // H2H is gathered from the same pre-match history snapshot as the forecast.
-        // It is displayed as context, but does not change the model probability.
-        val headToHeadMatches = validMatches.mapNotNull { (stored, historyA, historyB) ->
-            val isMeeting =
-                (historyA == keyA && historyB == keyB) ||
-                    (historyA == keyB && historyB == keyA)
-            if (!isMeeting) {
-                null
-            } else {
-                val winnerIsA = normalizeName(stored.record.winner) == keyA
-                HeadToHeadMatch(
-                    date = stored.record.date,
-                    surface = stored.record.surface,
-                    winner = if (winnerIsA) cleanA else cleanB,
-                    playerAWon = winnerIsA
-                )
-            }
-        }
+        // H2H is gathered inline from only meetings between the selected players.
         val surfaceMeetings = headToHeadMatches.filter { it.surface == surface }
         val headToHead = HeadToHeadEvidence(
             totalMatches = headToHeadMatches.size,
@@ -296,8 +327,8 @@ object MatchPredictionEngine {
 
         val modelSafe = model != null &&
             model.recommendedForPrediction &&
-            history.all { parseDate(it.record.date) != null } &&
-            (history.mapNotNull { parseDate(it.record.date) }.maxOrNull()?.isBefore(cutoff) ?: true)
+            hasOnlyDatedMatches &&
+            (latestHistoryDate?.isBefore(cutoff) ?: true)
 
         fun learnedProbability(eloA: Double, eloB: Double): Double? {
             if (!modelSafe || model == null) return null
@@ -378,16 +409,16 @@ object MatchPredictionEngine {
         cutoff: LocalDate,
         displayName: String?
     ): PlayerEvidence {
-        val recent = state.results.takeLast(MAX_RECENT)
-        val surfaceRecent = state.results.filter { it.surface == surface }.takeLast(MAX_RECENT)
+        val recent = state.recentResults.orEmpty()
+        val surfaceRecent = state.recentResultsBySurface?.get(surface).orEmpty()
         val lastDate = state.lastMatchDate
         val daysSince = parseDate(lastDate)?.let { java.time.temporal.ChronoUnit.DAYS.between(it, cutoff) }
         return PlayerEvidence(
             displayName = displayName ?: requestedName,
             overallElo = state.overallElo,
             surfaceElo = state.surfaceElos.getOrDefault(surface, DEFAULT_ELO),
-            totalMatches = state.results.size,
-            surfaceMatches = state.results.count { it.surface == surface },
+            totalMatches = state.totalMatches,
+            surfaceMatches = state.surfaceMatchCounts?.get(surface) ?: 0,
             recentWins = recent.count { it.won },
             recentMatches = recent.size,
             surfaceRecentWins = surfaceRecent.count { it.won },
@@ -396,6 +427,19 @@ object MatchPredictionEngine {
             daysSinceLastMatch = daysSince,
             usedUndatedMatches = state.undatedMatches
         )
+    }
+
+    private fun addRecentResult(state: PlayerState, result: HistoricalResult) {
+        val recentResults = state.recentResults ?: return
+        appendBounded(recentResults, result)
+        val surfaceBuffers = state.recentResultsBySurface ?: return
+        val surfaceResults = surfaceBuffers.getOrPut(result.surface) { mutableListOf() }
+        appendBounded(surfaceResults, result)
+    }
+
+    private fun appendBounded(results: MutableList<HistoricalResult>, result: HistoricalResult) {
+        if (results.size == MAX_RECENT) results.removeAt(0)
+        results.add(result)
     }
 
     private fun effectiveForm(evidence: PlayerEvidence): Double {
@@ -411,18 +455,22 @@ object MatchPredictionEngine {
     private fun parseDate(value: String): LocalDate? {
         val trimmed = value.trim()
         if (trimmed.isBlank()) return null
-        return runCatching {
-            if (trimmed.matches(Regex("\\d{8}"))) {
+        return try {
+            if (trimmed.length == 8 && trimmed.all(Char::isDigit)) {
                 LocalDate.parse(trimmed, DateTimeFormatter.BASIC_ISO_DATE)
             } else {
                 LocalDate.parse(trimmed.take(10))
             }
-        }.getOrNull()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun normalizeName(value: String): String =
         collapseWhitespace(value).lowercase(Locale.ROOT)
 
     private fun collapseWhitespace(value: String): String =
-        value.trim().replace(Regex("\\s+"), " ")
+        value.trim().replace(WHITESPACE_PATTERN, " ")
+
+    private val WHITESPACE_PATTERN = Regex("\\s+")
 }

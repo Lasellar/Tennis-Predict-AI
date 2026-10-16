@@ -28,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
@@ -41,11 +40,11 @@ import kotlin.math.roundToInt
 
 @Composable
 fun RealMatchPredictionCard(
-    matches: List<StoredMatch>,
+    matchCount: Int,
+    playerNames: List<String>,
     database: MatchDatabase,
     model: LogisticRegressionModel?
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var playerA by remember { mutableStateOf("") }
     var playerB by remember { mutableStateOf("") }
@@ -58,11 +57,11 @@ fun RealMatchPredictionCard(
     var forecast by remember { mutableStateOf<MatchForecast?>(null) }
     var savedPredictions by remember { mutableStateOf<List<SavedPrediction>>(emptyList()) }
 
-    val players = remember(matches) { MatchPredictionEngine.availablePlayers(matches) }
+    val players = remember(playerNames) { playerNames }
 
-    LaunchedEffect(matches, model) {
+    LaunchedEffect(database) {
         savedPredictions = withContext(Dispatchers.IO) {
-            database.reconcileSavedPredictions(matches)
+            database.reconcileSavedPredictions()
             database.loadSavedPredictions()
         }
     }
@@ -155,7 +154,7 @@ fun RealMatchPredictionCard(
                 }
 
                 Text(
-                    "В базе: ${players.size} игроков · ${matches.size} матчей",
+                    "В базе: ${players.size} игроков · ${matchCount} матчей",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Button(
@@ -180,14 +179,18 @@ fun RealMatchPredictionCard(
                                 messageIsError = false
                                 scope.launch {
                                     try {
+                                        val history = withContext(Dispatchers.IO) {
+                                            database.loadMatches()
+                                        }
                                         val result = withContext(Dispatchers.Default) {
                                             MatchPredictionEngine.calculate(
-                                                history = matches,
+                                                history = history,
                                                 playerA = playerA.trim(),
                                                 playerB = playerB.trim(),
                                                 surface = selectedSurface,
                                                 matchDate = validDate,
-                                                model = model
+                                                model = model,
+                                                historyAlreadyOrdered = true
                                             )
                                         }
                                         val a = result.playerAEvidence
@@ -707,16 +710,7 @@ private fun PlayerSearchField(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val suggestions = remember(value, players) {
-        if (value.isBlank()) emptyList()
-        else players.asSequence()
-            .filter { it.contains(value.trim(), ignoreCase = true) }
-            .filterNot { it.equals(value.trim(), ignoreCase = true) }
-            .sortedWith(
-                compareBy<String> { !it.startsWith(value.trim(), ignoreCase = true) }
-                    .thenBy { it.lowercase(Locale.ROOT) }
-            )
-            .take(8)
-            .toList()
+        findPlayerSuggestions(players, value, limit = 8)
     }
     Box {
         androidx.compose.material3.OutlinedTextField(

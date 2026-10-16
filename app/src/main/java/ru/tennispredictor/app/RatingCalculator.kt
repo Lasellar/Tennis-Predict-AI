@@ -24,39 +24,99 @@ data class RatingSnapshot(
 }
 
 /**
- * Rebuilds ratings from local match history. If every row has a date, matches are
- * processed chronologically (and kept in import order for same-day ties). If dates
- * are absent or mixed, insertion order is retained to avoid inventing chronology.
+ * Builds all four rating tables in one chronological pass.
+ *
+ * Accumulator is also used by MatchDatabase.loadSummary(), which feeds it directly
+ * from a SQLite cursor. That avoids creating 96k+ StoredMatch objects just to render
+ * the home screen and avoids re-sorting/re-scanning the same history four times.
  */
 object RatingCalculator {
-    fun calculate(matches: List<StoredMatch>): RatingSnapshot =
-        RatingSnapshot(
-            overall = buildRankings(matches),
-            hard = buildRankings(matches.filter { it.record.surface == Surface.HARD }),
-            clay = buildRankings(matches.filter { it.record.surface == Surface.CLAY }),
-            grass = buildRankings(matches.filter { it.record.surface == Surface.GRASS })
+    fun calculate(matches: List<StoredMatch>): RatingSnapshot {
+        val ordered = if (matches.all { it.record.date.isNotBlank() }) {
+            matches.sortedWith(compareBy<StoredMatch> { it.record.date }.thenBy { it.id })
+        } else {
+            matches.sortedBy { it.id }
+        }
+        val accumulator = Accumulator()
+        ordered.forEach { accumulator.add(it.record) }
+        return accumulator.snapshot()
+    }
+
+    class Accumulator {
+        private val overallRatings = linkedMapOf<String, Double>()
+        private val hardRatings = linkedMapOf<String, Double>()
+        private val clayRatings = linkedMapOf<String, Double>()
+        private val grassRatings = linkedMapOf<String, Double>()
+
+        private val overallStats = linkedMapOf<String, MutableStats>()
+        private val hardStats = linkedMapOf<String, MutableStats>()
+        private val clayStats = linkedMapOf<String, MutableStats>()
+        private val grassStats = linkedMapOf<String, MutableStats>()
+
+        fun add(record: MatchRecord) = add(
+            record.playerA,
+            record.playerB,
+            record.winner,
+            record.surface
         )
 
-    private fun buildRankings(input: List<StoredMatch>): List<PlayerRating> {
-        if (input.isEmpty()) return emptyList()
-        val ordered = if (input.all { it.record.date.isNotBlank() }) {
-            input.sortedWith(compareBy<StoredMatch> { it.record.date }.thenBy { it.id })
-        } else {
-            input.sortedBy { it.id }
-        }
-        val valid = ordered.map { it.record }.filter { match ->
-            match.playerA.isNotBlank() && match.playerB.isNotBlank() &&
-                !match.playerA.equals(match.playerB, ignoreCase = true) &&
-                (match.winner == match.playerA || match.winner == match.playerB)
-        }
-        if (valid.isEmpty()) return emptyList()
+        fun add(rawPlayerA: String, rawPlayerB: String, rawWinner: String, surface: Surface) {
+            val playerA = rawPlayerA.trim()
+            val playerB = rawPlayerB.trim()
+            val winner = rawWinner.trim()
+            if (playerA.isBlank() || playerB.isBlank() ||
+                playerA.equals(playerB, ignoreCase = true) ||
+                (winner != playerA && winner != playerB)
+            ) return
 
-        val ratings = TennisPredictor.trainElo(valid)
-        val stats = linkedMapOf<String, MutableStats>()
-        valid.forEach { match ->
-            val playerA = match.playerA.trim()
-            val playerB = match.playerB.trim()
-            val winner = match.winner.trim()
+            updateElo(overallRatings, playerA, playerB, winner)
+            updateStats(overallStats, playerA, playerB, winner)
+
+            when (surface) {
+                Surface.HARD -> {
+                    updateElo(hardRatings, playerA, playerB, winner)
+                    updateStats(hardStats, playerA, playerB, winner)
+                }
+                Surface.CLAY -> {
+                    updateElo(clayRatings, playerA, playerB, winner)
+                    updateStats(clayStats, playerA, playerB, winner)
+                }
+                Surface.GRASS -> {
+                    updateElo(grassRatings, playerA, playerB, winner)
+                    updateStats(grassStats, playerA, playerB, winner)
+                }
+                else -> Unit
+            }
+        }
+
+        fun snapshot(): RatingSnapshot = RatingSnapshot(
+            overall = buildPlayers(overallStats, overallRatings),
+            hard = buildPlayers(hardStats, hardRatings),
+            clay = buildPlayers(clayStats, clayRatings),
+            grass = buildPlayers(grassStats, grassRatings)
+        )
+
+        private fun updateElo(
+            ratings: MutableMap<String, Double>,
+            playerA: String,
+            playerB: String,
+            winner: String
+        ) {
+            val ratingA = ratings.getOrPut(playerA) { INITIAL_RATING }
+            val ratingB = ratings.getOrPut(playerB) { INITIAL_RATING }
+            val expectedA = TennisPredictor.probability(ratingA, ratingB)
+            val actualA = if (winner == playerA) 1.0 else 0.0
+            val change = K_FACTOR * (actualA - expectedA)
+            ratings[playerA] = ratingA + change
+            ratings[playerB] = ratingB - change
+        }
+
+        private fun updateStats(
+            stats: MutableMap<String, MutableStats>,
+            playerA: String,
+            playerB: String,
+            winner: String
+        ) {
             val a = stats.getOrPut(playerA) { MutableStats() }
             val b = stats.getOrPut(playerB) { MutableStats() }
             a.matches++
@@ -69,21 +129,27 @@ object RatingCalculator {
                 a.losses++
             }
         }
-
-        return stats.map { (name, value) ->
-            PlayerRating(
-                name = name,
-                rating = ratings[name] ?: 1500.0,
-                matches = value.matches,
-                wins = value.wins,
-                losses = value.losses
-            )
-        }.sortedWith(compareByDescending<PlayerRating> { it.rating }.thenBy { it.name })
     }
+
+    private fun buildPlayers(
+        stats: Map<String, MutableStats>,
+        ratings: Map<String, Double>
+    ): List<PlayerRating> = stats.map { (name, value) ->
+        PlayerRating(
+            name = name,
+            rating = ratings[name] ?: INITIAL_RATING,
+            matches = value.matches,
+            wins = value.wins,
+            losses = value.losses
+        )
+    }.sortedWith(compareByDescending<PlayerRating> { it.rating }.thenBy { it.name })
 
     private data class MutableStats(
         var matches: Int = 0,
         var wins: Int = 0,
         var losses: Int = 0
     )
+
+    private const val INITIAL_RATING = 1500.0
+    private const val K_FACTOR = 32.0
 }

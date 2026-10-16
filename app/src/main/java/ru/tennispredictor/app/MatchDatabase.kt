@@ -17,6 +17,14 @@ data class DatabaseImportSummary(
     val duplicates: Int
 )
 
+data class MatchDatabaseSummary(
+    val matchCount: Int,
+    val hardMatchCount: Int,
+    val clayMatchCount: Int,
+    val grassMatchCount: Int,
+    val ratings: RatingSnapshot
+)
+
 /**
  * A small on-device SQLite store. Imported results remain on this phone and are
  * not uploaded to a remote service.
@@ -39,6 +47,7 @@ class MatchDatabase(context: Context) :
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_matches_date ON $TABLE_MATCHES(match_date)")
+        db.execSQL("CREATE INDEX idx_matches_date_id ON $TABLE_MATCHES(match_date, id)")
         db.execSQL("CREATE INDEX idx_matches_surface ON $TABLE_MATCHES(surface)")
         createPredictionsTable(db)
     }
@@ -55,37 +64,136 @@ class MatchDatabase(context: Context) :
             createPredictionsTable(db)
             if (hasLegacyPredictions) migrateLegacyPredictions(db)
         }
+        if (oldVersion < 4) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_matches_date_id ON $TABLE_MATCHES(match_date, id)")
+        }
     }
 
+    /**
+     * Loads complete history only for an explicit analysis action. The home screen
+     * uses loadSummary(), which streams rows from SQLite without allocating one
+     * StoredMatch object per historical row.
+     */
     fun loadMatches(): List<StoredMatch> {
-        val result = mutableListOf<StoredMatch>()
-        readableDatabase.query(
+        val db = readableDatabase
+        val orderBy = if (hasUndatedMatches(db)) "id ASC" else "match_date ASC, id ASC"
+        val result = ArrayList<StoredMatch>()
+        db.query(
             TABLE_MATCHES,
             arrayOf("id", "match_date", "player_a", "player_b", "winner", "surface"),
             null,
             null,
             null,
             null,
-            "id ASC"
+            orderBy
+        ).use { cursor ->
+            while (cursor.moveToNext()) result += cursorToStoredMatch(cursor)
+        }
+        return result
+    }
+
+    /**
+     * Counts rows and computes the four Elo tables in a single cursor pass. The
+     * UI calls this on Dispatchers.IO, so large archives never block composition.
+     */
+    fun loadSummary(): MatchDatabaseSummary {
+        val db = readableDatabase
+        // One aggregate query replaces five independent table scans.
+        val counts = db.rawQuery(
+            """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN surface = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN surface = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN surface = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN match_date IS NULL OR TRIM(match_date) = '' THEN 1 ELSE 0 END), 0)
+            FROM $TABLE_MATCHES
+            """.trimIndent(),
+            arrayOf(Surface.HARD.name, Surface.CLAY.name, Surface.GRASS.name)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) IntArray(5) { cursor.getInt(it) } else IntArray(5)
+        }
+
+        val orderBy = if (counts[4] > 0) "id ASC" else "match_date ASC, id ASC"
+        val accumulator = RatingCalculator.Accumulator()
+        db.query(
+            TABLE_MATCHES,
+            arrayOf("id", "match_date", "player_a", "player_b", "winner", "surface"),
+            null,
+            null,
+            null,
+            null,
+            orderBy
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                val surfaceName = cursor.getString(cursor.getColumnIndexOrThrow("surface"))
-                val surface = runCatching { Surface.valueOf(surfaceName) }.getOrDefault(Surface.OTHER)
-                val record = MatchRecord(
-                    playerA = cursor.getString(cursor.getColumnIndexOrThrow("player_a")),
-                    playerB = cursor.getString(cursor.getColumnIndexOrThrow("player_b")),
-                    winner = cursor.getString(cursor.getColumnIndexOrThrow("winner")),
-                    surface = surface,
-                    date = cursor.getString(cursor.getColumnIndexOrThrow("match_date"))
+                val surface = runCatching {
+                    Surface.valueOf(cursor.getString(5))
+                }.getOrDefault(Surface.OTHER)
+                accumulator.add(
+                    rawPlayerA = cursor.getString(2),
+                    rawPlayerB = cursor.getString(3),
+                    rawWinner = cursor.getString(4),
+                    surface = surface
                 )
-                result += StoredMatch(
-                    id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                    record = record
-                )
+            }
+        }
+        return MatchDatabaseSummary(
+            matchCount = counts[0],
+            hardMatchCount = counts[1],
+            clayMatchCount = counts[2],
+            grassMatchCount = counts[3],
+            ratings = accumulator.snapshot()
+        )
+    }
+
+    /**
+     * Names are much smaller than the match table and are loaded separately.
+     * Deduplicate case/whitespace variants to keep autocomplete useful with large
+     * ATP/WTA archives.
+     */
+    fun loadPlayerNames(): List<String> {
+        val result = ArrayList<String>()
+        val seen = HashSet<String>()
+        readableDatabase.rawQuery(
+            """
+            SELECT player FROM (
+                SELECT TRIM(player_a) AS player FROM $TABLE_MATCHES
+                UNION
+                SELECT TRIM(player_b) AS player FROM $TABLE_MATCHES
+            )
+            WHERE player <> ''
+            ORDER BY player COLLATE NOCASE ASC
+            """.trimIndent(),
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(0).trim()
+                if (name.isNotBlank() && seen.add(normalize(name))) result += name
             }
         }
         return result
     }
+
+    private fun cursorToStoredMatch(cursor: android.database.Cursor): StoredMatch {
+        val surfaceName = cursor.getString(cursor.getColumnIndexOrThrow("surface"))
+        val surface = runCatching { Surface.valueOf(surfaceName) }.getOrDefault(Surface.OTHER)
+        return StoredMatch(
+            id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+            record = MatchRecord(
+                playerA = cursor.getString(cursor.getColumnIndexOrThrow("player_a")),
+                playerB = cursor.getString(cursor.getColumnIndexOrThrow("player_b")),
+                winner = cursor.getString(cursor.getColumnIndexOrThrow("winner")),
+                surface = surface,
+                date = cursor.getString(cursor.getColumnIndexOrThrow("match_date"))
+            )
+        )
+    }
+
+    private fun hasUndatedMatches(db: SQLiteDatabase): Boolean =
+        db.rawQuery(
+            "SELECT 1 FROM $TABLE_MATCHES WHERE match_date IS NULL OR TRIM(match_date) = '' LIMIT 1",
+            null
+        ).use { cursor -> cursor.moveToFirst() }
 
     /**
      * Adds a batch in one transaction. A stable signature prevents the same match
@@ -211,21 +319,56 @@ class MatchDatabase(context: Context) :
      * Resolve saved forecasts only when an imported result matches the planned date,
      * both players (in either order), and the selected surface. No fuzzy name matching.
      */
-    fun reconcileSavedPredictions(history: List<StoredMatch>): Int {
-        var resolved = 0
+    /**
+     * Reconciles only dates referenced by unresolved forecasts. This avoids a
+     * forecast-count × 96k-history scan and does not need to load match history.
+     */
+    fun reconcileSavedPredictions(): Int {
         val pending = loadSavedPredictions().filter { it.resultWinner.isNullOrBlank() }
+        if (pending.isEmpty()) return 0
+        val db = readableDatabase
+        var resolved = 0
         pending.forEach { prediction ->
-            val match = history.firstOrNull { stored ->
-                normalizeMatchDate(stored.record.date) == prediction.matchDate &&
-                    stored.record.surface == prediction.surface &&
-                    setOf(normalize(stored.record.playerA), normalize(stored.record.playerB)) ==
-                    setOf(normalize(prediction.playerA), normalize(prediction.playerB)) &&
-                    stored.record.winner.isNotBlank()
+            val matchDate = prediction.matchDate.trim()
+            if (matchDate.isBlank()) return@forEach
+            val compactDate = matchDate.replace("-", "")
+            var winner: String? = null
+            db.query(
+                TABLE_MATCHES,
+                arrayOf("match_date", "player_a", "player_b", "winner", "surface"),
+                "(match_date = ? OR match_date = ?) AND surface = ?",
+                arrayOf(matchDate, compactDate, prediction.surface.name),
+                null,
+                null,
+                "id DESC"
+            ).use { cursor ->
+                while (winner == null && cursor.moveToNext()) {
+                    val date = cursor.getString(cursor.getColumnIndexOrThrow("match_date"))
+                    val playerA = cursor.getString(cursor.getColumnIndexOrThrow("player_a"))
+                    val playerB = cursor.getString(cursor.getColumnIndexOrThrow("player_b"))
+                    val resultWinner = cursor.getString(cursor.getColumnIndexOrThrow("winner"))
+                    val playersMatch =
+                        setOf(normalize(playerA), normalize(playerB)) ==
+                            setOf(normalize(prediction.playerA), normalize(prediction.playerB))
+                    if (normalizeMatchDate(date) == matchDate &&
+                        playersMatch &&
+                        !resultWinner.isNullOrBlank()
+                    ) {
+                        winner = resultWinner
+                    }
+                }
             }
-            if (match != null && resolvePredictionResult(prediction.id, match.record.winner)) resolved++
+            if (winner != null && resolvePredictionResult(prediction.id, winner!!)) resolved++
         }
         return resolved
     }
+
+    /**
+     * Backward-compatible overload. Matching is performed through indexed,
+     * date-scoped database queries rather than scanning the supplied full list.
+     */
+    fun reconcileSavedPredictions(@Suppress("UNUSED_PARAMETER") history: List<StoredMatch>): Int =
+        reconcileSavedPredictions()
 
     private fun createPredictionsTable(db: SQLiteDatabase) {
         db.execSQL(
@@ -340,9 +483,26 @@ class MatchDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "tennis_predictor_history.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
         const val TABLE_MATCHES = "matches"
         const val TABLE_PREDICTIONS = "saved_predictions"
         const val LEGACY_TABLE_PREDICTIONS = "predictions"
+    }
+}
+
+
+/**
+ * Application-scoped database helper. Keeping one helper for the process avoids
+ * closing an active SQLite cursor when Android recreates the Activity on rotation.
+ */
+object MatchDatabaseProvider {
+    @Volatile
+    private var instance: MatchDatabase? = null
+
+    fun get(context: Context): MatchDatabase {
+        instance?.let { return it }
+        return synchronized(this) {
+            instance ?: MatchDatabase(context.applicationContext).also { instance = it }
+        }
     }
 }

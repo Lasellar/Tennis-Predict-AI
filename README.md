@@ -2,6 +2,15 @@
 
 Android MVP for estimating tennis match win probabilities from historical results.
 
+## Version 0.6.1
+
+- Avoid loading the complete match table into Compose state on launch. Counts and Elo rankings are computed from a SQLite cursor on a background dispatcher.
+- Compute overall, hard, clay and grass ratings in one pass, and aggregate match/surface counts with one SQL query.
+- Keep a process-wide summary cache and reuse the SQLite helper across activity recreation to prevent orientation changes from starting duplicate full-history work or closing an active cursor.
+- Load match rows only when a user explicitly requests a forecast or starts model training.
+- Bound forecast memory by retaining recent-form records only for the two selected players and collecting H2H meetings inline instead of building full-history temporary lists.
+- Reconcile saved forecasts using date-scoped database queries and cap autocomplete at eight suggestions without sorting every partial match.
+
 ## Version 0.6
 
 - Added a date-safe, smoothed head-to-head (H2H) feature: only prior meetings count, and meetings from the same tournament date cannot leak into feature snapshots.

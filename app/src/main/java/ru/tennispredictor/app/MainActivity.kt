@@ -23,7 +23,6 @@ import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Locale
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -42,18 +41,38 @@ private data class ImportUiResult(
     val duplicates: Int,
     val invalidRows: Int,
     val parseIssues: List<String>,
-    val allMatches: List<StoredMatch>,
+    val summary: MatchDatabaseSummary,
+    val playerNames: List<String>,
     val selectedFiles: Int,
     val filesWithMatches: Int,
     val fileErrors: List<String>
 )
+
+private object HistorySummaryCache {
+    @Volatile var summary: MatchDatabaseSummary? = null
+    @Volatile var playerNames: List<String>? = null
+
+    fun getOrLoadSummary(loader: () -> MatchDatabaseSummary): MatchDatabaseSummary {
+        summary?.let { return it }
+        return synchronized(this) {
+            summary ?: loader().also { summary = it }
+        }
+    }
+
+    fun getOrLoadPlayerNames(loader: () -> List<String>): List<String> {
+        playerNames?.let { return it }
+        return synchronized(this) {
+            playerNames ?: loader().also { playerNames = it }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PredictorScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val database = remember { MatchDatabase(context.applicationContext) }
+    val database = remember { MatchDatabaseProvider.get(context.applicationContext) }
 
     var playerA by remember { mutableStateOf("Player A") }
     var playerB by remember { mutableStateOf("Player B") }
@@ -64,7 +83,14 @@ private fun PredictorScreen() {
     }
     var error by remember { mutableStateOf<String?>(null) }
 
-    var storedMatches by remember { mutableStateOf<List<StoredMatch>>(emptyList()) }
+    var matchCount by remember { mutableIntStateOf(0) }
+    var hardMatchCount by remember { mutableIntStateOf(0) }
+    var clayMatchCount by remember { mutableIntStateOf(0) }
+    var grassMatchCount by remember { mutableIntStateOf(0) }
+    var ratingSnapshot by remember {
+        mutableStateOf(RatingSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
+    }
+    var playerNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var isImporting by remember { mutableStateOf(false) }
     var importMessage by remember { mutableStateOf<String?>(null) }
     var importMessageIsError by remember { mutableStateOf(false) }
@@ -75,17 +101,19 @@ private fun PredictorScreen() {
     var trainedModel by remember { mutableStateOf<LogisticRegressionModel?>(null) }
     var predictionSource by remember { mutableStateOf("Источник: базовая модель Elo") }
 
-    val ratingSnapshot = remember(storedMatches) { RatingCalculator.calculate(storedMatches) }
-    val playerNames = remember(ratingSnapshot.overall) {
-        ratingSnapshot.overall.map { it.name }.distinct().sortedBy { it.lowercase(Locale.ROOT) }
-    }
-
-    DisposableEffect(database) {
-        onDispose { database.close() }
-    }
-
     LaunchedEffect(database) {
-        storedMatches = withContext(Dispatchers.IO) { database.loadMatches() }
+        val summary = withContext(Dispatchers.IO) {
+            HistorySummaryCache.getOrLoadSummary { database.loadSummary() }
+        }
+        matchCount = summary.matchCount
+        hardMatchCount = summary.hardMatchCount
+        clayMatchCount = summary.clayMatchCount
+        grassMatchCount = summary.grassMatchCount
+        ratingSnapshot = summary.ratings
+
+        playerNames = withContext(Dispatchers.IO) {
+            HistorySummaryCache.getOrLoadPlayerNames { database.loadPlayerNames() }
+        }
         trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
     }
 
@@ -131,18 +159,27 @@ private fun PredictorScreen() {
                         }
 
                         val saved = database.insertMatches(combinedRecords)
+                        database.reconcileSavedPredictions()
                         ImportUiResult(
                             inserted = saved.inserted,
                             duplicates = saved.duplicates,
                             invalidRows = invalidRows,
                             parseIssues = parseIssues,
-                            allMatches = database.loadMatches(),
+                            summary = database.loadSummary(),
+                            playerNames = database.loadPlayerNames(),
                             selectedFiles = uris.size,
                             filesWithMatches = filesWithMatches,
                             fileErrors = fileErrors
                         )
                     }
-                    storedMatches = result.allMatches
+                    HistorySummaryCache.summary = result.summary
+                    HistorySummaryCache.playerNames = result.playerNames
+                    matchCount = result.summary.matchCount
+                    hardMatchCount = result.summary.hardMatchCount
+                    clayMatchCount = result.summary.clayMatchCount
+                    grassMatchCount = result.summary.grassMatchCount
+                    ratingSnapshot = result.summary.ratings
+                    playerNames = result.playerNames
                     importMessageIsError = false
                     importMessage = buildString {
                         append("Обработано CSV: ${result.filesWithMatches}/${result.selectedFiles}. ")
@@ -203,7 +240,7 @@ private fun PredictorScreen() {
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                "${storedMatches.size}",
+                                "${matchCount}",
                                 style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.secondary,
                                 fontWeight = FontWeight.Bold
@@ -240,7 +277,7 @@ private fun PredictorScreen() {
                     title = "Прогноз матча",
                     subtitle = "Оцени шансы игроков с учётом истории, покрытия и формы."
                 )
-                if (storedMatches.isEmpty()) {
+                if (matchCount == 0) {
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -271,7 +308,8 @@ private fun PredictorScreen() {
                     }
                 }
                 RealMatchPredictionCard(
-                    matches = storedMatches,
+                    matchCount = matchCount,
+                    playerNames = playerNames,
                     database = database,
                     model = trainedModel
                 )
@@ -417,8 +455,10 @@ private fun PredictorScreen() {
                                         val matchB = playerB.trim()
                                         val matchSurface = selectedRatingSurface ?: Surface.HARD
                                         val modelSnapshot = trainedModel
-                                        val historySnapshot = storedMatches.toList()
                                         scope.launch {
+                                            val historySnapshot = withContext(Dispatchers.IO) {
+                                                database.loadMatches()
+                                            }
                                             val learnedProbability = withContext(Dispatchers.Default) {
                                                 modelSnapshot?.let {
                                                     ModelTrainer.predictFutureProbability(
@@ -522,7 +562,7 @@ private fun PredictorScreen() {
                 ) {
                     SummaryTile(
                         label = "Матчей на устройстве",
-                        value = storedMatches.size.toString(),
+                        value = matchCount.toString(),
                         modifier = Modifier.weight(1f)
                     )
                     SummaryTile(
@@ -603,22 +643,22 @@ private fun PredictorScreen() {
                 )
                 RankingCard(
                     title = "Общий рейтинг Elo",
-                    subtitle = "Все покрытия · ${storedMatches.size} матчей",
+                    subtitle = "Все покрытия · ${matchCount} матчей",
                     players = ratingSnapshot.overall
                 )
                 RankingCard(
                     title = "Рейтинг на харде",
-                    subtitle = "${storedMatches.count { it.record.surface == Surface.HARD }} матчей",
+                    subtitle = "${hardMatchCount} матчей",
                     players = ratingSnapshot.hard
                 )
                 RankingCard(
                     title = "Рейтинг на грунте",
-                    subtitle = "${storedMatches.count { it.record.surface == Surface.CLAY }} матчей",
+                    subtitle = "${clayMatchCount} матчей",
                     players = ratingSnapshot.clay
                 )
                 RankingCard(
                     title = "Рейтинг на траве",
-                    subtitle = "${storedMatches.count { it.record.surface == Surface.GRASS }} матчей",
+                    subtitle = "${grassMatchCount} матчей",
                     players = ratingSnapshot.grass
                 )
             }
@@ -634,7 +674,11 @@ private fun PredictorScreen() {
                     title = "Обучение модели",
                     subtitle = "Сравни алгоритмы на прошлых датах и используй модель только при подтверждённом улучшении."
                 )
-                ModelTrainingCard(matches = storedMatches, onModelTrained = { trainedModel = it })
+                ModelTrainingCard(
+                    database = database,
+                    matchCount = matchCount,
+                    onModelTrained = { trainedModel = it }
+                )
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
@@ -718,18 +762,7 @@ private fun PlayerNameField(
     var expanded by remember { mutableStateOf(false) }
     val query = value.trim()
     val suggestions = remember(query, playerNames) {
-        if (query.length < 2 || playerNames.any { it.equals(query, ignoreCase = true) }) {
-            emptyList()
-        } else {
-            playerNames.asSequence()
-                .filter { it.contains(query, ignoreCase = true) }
-                .sortedWith(
-                    compareBy<String> { !it.startsWith(query, ignoreCase = true) }
-                        .thenBy { it.lowercase(Locale.ROOT) }
-                )
-                .take(500)
-                .toList()
-        }
+        findPlayerSuggestions(playerNames, query, limit = 8)
     }
 
     Box(Modifier.fillMaxWidth()) {
