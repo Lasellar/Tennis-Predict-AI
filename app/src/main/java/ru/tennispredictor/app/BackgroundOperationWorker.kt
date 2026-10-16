@@ -80,6 +80,14 @@ object BackgroundOperations {
         enqueue(context, input, BackgroundOperationWorker.TAG_IMPORT)
     }
 
+    fun enqueueRestore(context: Context, backupUri: Uri) {
+        val input = Data.Builder()
+            .putString(BackgroundOperationWorker.KEY_OPERATION, BackgroundOperationWorker.OP_RESTORE)
+            .putStringArray(BackgroundOperationWorker.KEY_URIS, arrayOf(backupUri.toString()))
+            .build()
+        enqueue(context, input, BackgroundOperationWorker.TAG_IMPORT, BackgroundOperationWorker.TAG_RESTORE)
+    }
+
     fun enqueueTraining(context: Context) {
         val input = workDataOf(
             BackgroundOperationWorker.KEY_OPERATION to BackgroundOperationWorker.OP_TRAIN
@@ -87,11 +95,17 @@ object BackgroundOperations {
         enqueue(context, input, BackgroundOperationWorker.TAG_TRAIN)
     }
 
-    private fun enqueue(context: Context, input: Data, tag: String) {
-        val request = OneTimeWorkRequestBuilder<BackgroundOperationWorker>()
+    private fun enqueue(
+        context: Context,
+        input: Data,
+        tag: String,
+        additionalTag: String? = null
+    ) {
+        val requestBuilder = OneTimeWorkRequestBuilder<BackgroundOperationWorker>()
             .setInputData(input)
             .addTag(tag)
-            .build()
+        if (additionalTag != null) requestBuilder.addTag(additionalTag)
+        val request = requestBuilder.build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             BackgroundOperationWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.KEEP,
@@ -108,7 +122,7 @@ class BackgroundOperationWorker(
     override suspend fun doWork(): Result {
         val operation = inputData.getString(KEY_OPERATION)
             ?: return Result.failure(workDataOf(KEY_ERROR to "Не указан тип фоновой операции."))
-        if (operation != OP_IMPORT && operation != OP_TRAIN) {
+        if (operation != OP_IMPORT && operation != OP_RESTORE && operation != OP_TRAIN) {
             return Result.failure(workDataOf(KEY_ERROR to "Неизвестный тип фоновой операции."))
         }
 
@@ -119,6 +133,7 @@ class BackgroundOperationWorker(
             val output = withProgressReporter(operation) { report ->
                 when (operation) {
                     OP_IMPORT -> importArchives(report)
+                    OP_RESTORE -> importArchives(report, restoringBackup = true)
                     OP_TRAIN -> trainModel(report)
                     else -> error("Неизвестный тип операции")
                 }
@@ -164,7 +179,7 @@ class BackgroundOperationWorker(
             updates.send(
                 ProgressUpdate(
                     100,
-                    if (operation == OP_IMPORT) "Импорт архивов завершён" else "Обучение модели завершено"
+                    if (operation == OP_TRAIN) "Обучение модели завершено" else "История матчей готова"
                 )
             )
             output
@@ -174,7 +189,10 @@ class BackgroundOperationWorker(
         }
     }
 
-    private suspend fun importArchives(report: (Int, String) -> Unit): Data {
+    private suspend fun importArchives(
+        report: (Int, String) -> Unit,
+        restoringBackup: Boolean = false
+    ): Data {
         val uriStrings = inputData.getStringArray(KEY_URIS)?.toList().orEmpty()
         require(uriStrings.isNotEmpty()) { "Не выбраны CSV-файлы для импорта." }
 
@@ -191,7 +209,8 @@ class BackgroundOperationWorker(
                 val uri = Uri.parse(uriString)
                 report(
                     4 + index * 70 / totalFiles,
-                    "Чтение архива ${index + 1} из $totalFiles"
+                    if (restoringBackup) "Восстановление истории из резервной копии"
+                    else "Чтение архива ${index + 1} из $totalFiles"
                 )
                 try {
                     val csv = requireNotNull(applicationContext.contentResolver.openInputStream(uri)) {
@@ -202,7 +221,11 @@ class BackgroundOperationWorker(
                         val fraction = if (total > 0) processed.toDouble() / total else 1.0
                         val overallFraction = (index + fraction) / totalFiles
                         val percent = (5 + overallFraction * 70).toInt().coerceIn(5, 75)
-                        report(percent, "Разбор архива ${index + 1} из $totalFiles")
+                        report(
+                            percent,
+                            if (restoringBackup) "Проверка резервной копии истории"
+                            else "Разбор архива ${index + 1} из $totalFiles"
+                        )
                     }
                     invalidRows += parsed.invalidRows
                     if (parseIssues.size < 5) {
@@ -228,14 +251,33 @@ class BackgroundOperationWorker(
                 val fraction = processed.toDouble() / total.coerceAtLeast(1)
                 report(77 + (fraction * 16).toInt(), "Сохранение матчей в локальной базе данных")
             }
-            report(95, "Обновление результатов сохранённых прогнозов")
+            report(94, "Обновление результатов сохранённых прогнозов")
             database.reconcileSavedPredictions()
+            if (!restoringBackup) {
+                if (MatchHistoryBackup.isSupported()) {
+                report(96, "Создание резервной копии истории")
+                MatchHistoryBackup.writeBackup(applicationContext, database) { percentage ->
+                    report(96 + percentage * 3 / 100, "Сохранение резервной копии в Downloads/TennisPredict")
+                }
+            }
+            }
             inserted
         }
 
         val message = buildString {
-            append("Обработано CSV: $filesWithMatches/$totalFiles. ")
-            append("Добавлено матчей: ${saved.inserted}; повторов пропущено: ${saved.duplicates}.")
+            if (restoringBackup) {
+                append("История восстановлена из резервной копии. ")
+            } else {
+                append("Обработано CSV: $filesWithMatches/$totalFiles. ")
+                append("Добавлено матчей: ${saved.inserted}; повторов пропущено: ${saved.duplicates}.")
+                append(
+                    if (MatchHistoryBackup.isSupported()) {
+                        " Резервная копия сохранена в Downloads/TennisPredict."
+                    } else {
+                        " Системное резервное копирование Android также включено."
+                    }
+                )
+            }
             if (invalidRows > 0) append(" Ошибочных строк: $invalidRows.")
             if (parseIssues.isNotEmpty()) append(" Пример ошибки строки: ${parseIssues.first()}.")
             if (fileErrors.isNotEmpty()) {
@@ -281,7 +323,11 @@ class BackgroundOperationWorker(
         percent: Int,
         status: String
     ): ForegroundInfo {
-        val title = if (operation == OP_IMPORT) "Импорт теннисных архивов" else "Обучение модели Tennis Predict"
+        val title = when (operation) {
+            OP_IMPORT -> "Импорт теннисных архивов"
+            OP_RESTORE -> "Восстановление истории Tennis Predict"
+            else -> "Обучение модели Tennis Predict"
+        }
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -340,8 +386,10 @@ class BackgroundOperationWorker(
         const val KEY_MESSAGE = "message"
         const val KEY_ERROR = "error"
         const val OP_IMPORT = "import_archives"
+        const val OP_RESTORE = "restore_history_backup"
         const val OP_TRAIN = "train_model"
         const val TAG_IMPORT = "tennis_predict_import"
+        const val TAG_RESTORE = "tennis_predict_restore"
         const val TAG_TRAIN = "tennis_predict_train"
         private const val NOTIFICATION_ID = 6102
         private const val NOTIFICATION_CHANNEL_ID = "tennis_predict_long_operations"

@@ -45,6 +45,7 @@ fun ModelTrainingCard(
         ?: operationWorkInfos.lastOrNull()
     val operationInProgress = operationWorkInfo?.state?.isFinished == false
     val operationType = when {
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_RESTORE) == true -> BackgroundOperationWorker.OP_RESTORE
         operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_IMPORT) == true -> BackgroundOperationWorker.OP_IMPORT
         operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_TRAIN) == true -> BackgroundOperationWorker.OP_TRAIN
         else -> null
@@ -251,6 +252,8 @@ fun ModelTrainingCard(
                 Text(
                     when {
                         busy -> "Обучаем и проверяем… $trainingProgress%"
+                        operationInProgress && operationType == BackgroundOperationWorker.OP_RESTORE ->
+                            "Восстанавливаем историю…"
                         operationInProgress -> "Выполняется импорт архивов…"
                         else -> "Обучить, сравнить и выбрать модель"
                     }

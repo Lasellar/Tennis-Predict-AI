@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.security.MessageDigest
 import java.util.Locale
+import java.io.Writer
 
 data class StoredMatch(
     val id: Long,
@@ -234,6 +235,51 @@ class MatchDatabase(context: Context) :
         return DatabaseImportSummary(inserted = inserted, duplicates = duplicates)
     }
 
+
+    /**
+     * Streams the match history to a portable CSV without materializing the full
+     * 96k+ row history as another in-memory list. The file can survive app removal
+     * because it is written into the shared Downloads collection.
+     */
+    fun exportMatchesCsv(
+        writer: Writer,
+        onProgress: ((processed: Int, total: Int) -> Unit)? = null
+    ) {
+        val db = readableDatabase
+        val total = db.rawQuery("SELECT COUNT(*) FROM $TABLE_MATCHES", null).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+        writer.append("date,player_a,player_b,winner,surface\n")
+        val progressInterval = maxOf(1, total / 100)
+        var processed = 0
+        db.query(
+            TABLE_MATCHES,
+            arrayOf("match_date", "player_a", "player_b", "winner", "surface"),
+            null,
+            null,
+            null,
+            null,
+            "match_date ASC, id ASC"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val fields = (0 until cursor.columnCount).map { index ->
+                    escapeCsv(cursor.getString(index) ?: "")
+                }
+                writer.append(fields.joinToString(",")).append('\n')
+                processed++
+                if (processed % progressInterval == 0 || processed == total) {
+                    onProgress?.invoke(processed, total)
+                }
+            }
+        }
+        if (total == 0) onProgress?.invoke(0, 0)
+        writer.flush()
+    }
+
+    private fun escapeCsv(value: String): String {
+        if (value.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return value
+        return "\"" + value.replace("\"", "\"\"") + "\""
+    }
 
     fun savePrediction(prediction: SavedPrediction): Long {
         val values = ContentValues().apply {
