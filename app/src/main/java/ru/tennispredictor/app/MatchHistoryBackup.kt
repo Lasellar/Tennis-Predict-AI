@@ -5,7 +5,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
@@ -21,7 +20,7 @@ import java.io.OutputStreamWriter
 object MatchHistoryBackup {
     const val BACKUP_FILE_NAME = "tennis_predict_history_backup.csv"
     private const val MIME_TYPE = "text/csv"
-    private const val DIRECTORY = "${Environment.DIRECTORY_DOWNLOADS}/TennisPredict/"
+    private const val DIRECTORY = "Download/TennisPredict/"
 
     fun findBackup(context: Context): Uri? = findBackupUris(context).firstOrNull()
 
