@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -13,9 +14,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.getWorkInfosForUniqueWorkFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -23,7 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -34,10 +38,49 @@ fun ModelTrainingCard(
     onModelTrained: (LogisticRegressionModel) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
+    val workManager = remember { WorkManager.getInstance(context.applicationContext) }
+    val operationWorkInfos by remember(workManager) {
+        workManager.getWorkInfosForUniqueWorkFlow(BackgroundOperationWorker.UNIQUE_WORK_NAME)
+    }.collectAsState(initial = emptyList())
+    val operationWorkInfo = operationWorkInfos.firstOrNull { !it.state.isFinished }
+        ?: operationWorkInfos.lastOrNull()
+    val operationInProgress = operationWorkInfo?.state?.isFinished == false
+    val operationType = operationWorkInfo?.inputData?.getString(BackgroundOperationWorker.KEY_OPERATION)
+    val busy = operationInProgress && operationType == BackgroundOperationWorker.OP_TRAIN
+    val trainingProgress = if (busy) {
+        operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0) ?: 0
+    } else 0
+    val trainingStatus = operationWorkInfo?.progress?.getString(BackgroundOperationWorker.KEY_STATUS)
+        ?: "Подготовка к обучению"
+    val startAfterNotificationPermission = rememberNotificationPermissionGate()
     var message by remember { mutableStateOf("Сравним варианты по историческим результатам") }
-    var report by remember { mutableStateOf<ModelComparisonReport?>(null) }
+    var report by remember { mutableStateOf(BackgroundOperationResults.latestTrainingReport) }
+
+    LaunchedEffect(operationWorkInfo?.id, operationWorkInfo?.state) {
+        val info = operationWorkInfo ?: return@LaunchedEffect
+        if (info.inputData.getString(BackgroundOperationWorker.KEY_OPERATION) != BackgroundOperationWorker.OP_TRAIN) {
+            return@LaunchedEffect
+        }
+        when (info.state) {
+            WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
+                report = null
+                message = info.progress.getString(BackgroundOperationWorker.KEY_STATUS)
+                    ?: "Обучение модели выполняется в фоне"
+            }
+            WorkInfo.State.SUCCEEDED -> {
+                report = BackgroundOperationResults.latestTrainingReport
+                message = info.outputData.getString(BackgroundOperationWorker.KEY_MESSAGE)
+                    ?: "Обучение модели завершено."
+                val savedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
+                if (savedModel != null) onModelTrained(savedModel)
+            }
+            WorkInfo.State.FAILED -> {
+                report = null
+                message = info.outputData.getString(BackgroundOperationWorker.KEY_ERROR) ?: "Ошибка обучения модели"
+            }
+            else -> Unit
+        }
+    }
 
     Card {
         Column(
@@ -54,7 +97,25 @@ fun ModelTrainingCard(
             if (matchCount < ModelTrainer.MINIMUM_DATED_MATCHES) {
                 Text("Матчей импортировано: ${matchCount}. Для обучения требуется минимум ${ModelTrainer.MINIMUM_DATED_MATCHES} корректных датированных матчей.")
             }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (busy) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Text("$trainingProgress%", fontWeight = FontWeight.SemiBold)
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                    Text(
+                        trainingStatus,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = trainingProgress / 100f,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             report?.let { r ->
                 HorizontalDivider()
@@ -171,30 +232,21 @@ fun ModelTrainingCard(
 
             Button(
                 onClick = {
-                    busy = true
-                    scope.launch {
-                        try {
-                            val snapshot = withContext(Dispatchers.IO) {
-                                database.loadMatches()
-                            }
-                            val result = withContext(Dispatchers.Default) {
-                                ModelTrainer.trainAndEvaluate(snapshot)
-                            }
-                            withContext(Dispatchers.IO) { ModelStore(context).save(result.model) }
-                            onModelTrained(result.model)
-                            message = "Проверка завершена: ${result.testMatches} финальных тестовых матчей"
-                            report = result
-                        } catch (e: Exception) {
-                            message = e.message ?: "Ошибка обучения"
-                        } finally {
-                            busy = false
-                        }
+                    message = "Ставим обучение в очередь…"
+                    startAfterNotificationPermission {
+                        BackgroundOperations.enqueueTraining(context)
                     }
                 },
-                enabled = !busy && matchCount >= ModelTrainer.MINIMUM_DATED_MATCHES,
+                enabled = !operationInProgress && matchCount >= ModelTrainer.MINIMUM_DATED_MATCHES,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (busy) "Обучаем и проверяем…" else "Обучить, сравнить и выбрать модель")
+                Text(
+                    when {
+                        busy -> "Обучаем и проверяем… $trainingProgress%"
+                        operationInProgress -> "Выполняется импорт архивов…"
+                        else -> "Обучить, сравнить и выбрать модель"
+                    }
+                )
             }
         }
     }

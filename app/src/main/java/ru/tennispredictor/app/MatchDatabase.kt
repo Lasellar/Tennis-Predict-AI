@@ -199,13 +199,14 @@ class MatchDatabase(context: Context) :
      * Adds a batch in one transaction. A stable signature prevents the same match
      * from being added repeatedly when a user imports the same CSV again.
      */
-    fun insertMatches(matches: List<MatchRecord>): DatabaseImportSummary {
+    fun insertMatches(matches: List<MatchRecord>, onProgress: ((processed: Int, total: Int) -> Unit)? = null): DatabaseImportSummary {
         var inserted = 0
         var duplicates = 0
         val db = writableDatabase
         db.beginTransaction()
+        val progressInterval = maxOf(1, matches.size / 100)
         try {
-            matches.forEach { match ->
+            matches.forEachIndexed { index, match ->
                 val values = ContentValues().apply {
                     put("match_date", match.date)
                     put("player_a", match.playerA.trim())
@@ -221,6 +222,10 @@ class MatchDatabase(context: Context) :
                     SQLiteDatabase.CONFLICT_IGNORE
                 )
                 if (rowId == -1L) duplicates++ else inserted++
+                val processed = index + 1
+                if (processed % progressInterval == 0 || processed == matches.size) {
+                    onProgress?.invoke(processed, matches.size)
+                }
             }
             db.setTransactionSuccessful()
         } finally {
