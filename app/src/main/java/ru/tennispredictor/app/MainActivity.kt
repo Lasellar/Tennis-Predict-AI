@@ -648,7 +648,7 @@ private fun PredictorScreen() {
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
-                            "История автоматически сохраняется в Downloads/TennisPredict и восстановится после переустановки приложения.",
+                            "История копируется в Downloads/TennisPredict. После переустановки приложение попробует восстановить её автоматически.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
