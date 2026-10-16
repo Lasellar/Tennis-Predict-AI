@@ -202,6 +202,24 @@ private fun PredictorScreen() {
         }
     }
 
+    val restorePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            startAfterNotificationPermission {
+                importMessage = null
+                importMessageIsError = false
+                BackgroundOperations.enqueueRestore(context, uri)
+            }
+        }
+    }
+
 
     var selectedTab by remember { mutableStateOf(0) }
     var manualExpanded by remember { mutableStateOf(false) }
@@ -634,6 +652,23 @@ private fun PredictorScreen() {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (matchCount == 0 && !operationInProgress) {
+                            OutlinedButton(
+                                onClick = {
+                                    restorePicker.launch(
+                                        arrayOf("text/csv", "text/comma-separated-values", "application/vnd.ms-excel", "*/*")
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Восстановить историю из резервной копии")
+                            }
+                            Text(
+                                "Выбери tennis_predict_history_backup.csv из папки Downloads/TennisPredict. Повторно скачивать ATP/WTA-архив не потребуется.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
                 Card(
