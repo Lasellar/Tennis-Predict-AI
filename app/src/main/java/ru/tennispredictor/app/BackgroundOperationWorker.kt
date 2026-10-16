@@ -85,7 +85,7 @@ object BackgroundOperations {
             .putString(BackgroundOperationWorker.KEY_OPERATION, BackgroundOperationWorker.OP_RESTORE)
             .putStringArray(BackgroundOperationWorker.KEY_URIS, arrayOf(backupUri.toString()))
             .build()
-        enqueue(context, input, BackgroundOperationWorker.TAG_IMPORT)
+        enqueue(context, input, BackgroundOperationWorker.TAG_IMPORT, BackgroundOperationWorker.TAG_RESTORE)
     }
 
     fun enqueueTraining(context: Context) {
@@ -95,11 +95,17 @@ object BackgroundOperations {
         enqueue(context, input, BackgroundOperationWorker.TAG_TRAIN)
     }
 
-    private fun enqueue(context: Context, input: Data, tag: String) {
-        val request = OneTimeWorkRequestBuilder<BackgroundOperationWorker>()
+    private fun enqueue(
+        context: Context,
+        input: Data,
+        tag: String,
+        additionalTag: String? = null
+    ) {
+        val requestBuilder = OneTimeWorkRequestBuilder<BackgroundOperationWorker>()
             .setInputData(input)
             .addTag(tag)
-            .build()
+        if (additionalTag != null) requestBuilder.addTag(additionalTag)
+        val request = requestBuilder.build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             BackgroundOperationWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.KEEP,
@@ -375,6 +381,7 @@ class BackgroundOperationWorker(
         const val OP_RESTORE = "restore_history_backup"
         const val OP_TRAIN = "train_model"
         const val TAG_IMPORT = "tennis_predict_import"
+        const val TAG_RESTORE = "tennis_predict_restore"
         const val TAG_TRAIN = "tennis_predict_train"
         private const val NOTIFICATION_ID = 6102
         private const val NOTIFICATION_CHANNEL_ID = "tennis_predict_long_operations"
