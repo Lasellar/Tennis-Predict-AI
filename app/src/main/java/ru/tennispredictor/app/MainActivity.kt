@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.getWorkInfosForUniqueWorkFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,7 +71,11 @@ private fun PredictorScreen() {
     val operationWorkInfo = operationWorkInfos.firstOrNull { !it.state.isFinished }
         ?: operationWorkInfos.lastOrNull()
     val operationInProgress = operationWorkInfo?.state?.isFinished == false
-    val operationType = operationWorkInfo?.inputData?.getString(BackgroundOperationWorker.KEY_OPERATION)
+    val operationType = when {
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_IMPORT) == true -> BackgroundOperationWorker.OP_IMPORT
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_TRAIN) == true -> BackgroundOperationWorker.OP_TRAIN
+        else -> null
+    }
     val isImporting = operationInProgress && operationType == BackgroundOperationWorker.OP_IMPORT
     val importProgress = if (isImporting) {
         operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0) ?: 0
@@ -125,8 +128,8 @@ private fun PredictorScreen() {
 
     LaunchedEffect(operationWorkInfo?.id, operationWorkInfo?.state) {
         val info = operationWorkInfo ?: return@LaunchedEffect
-        when (info.inputData.getString(BackgroundOperationWorker.KEY_OPERATION)) {
-            BackgroundOperationWorker.OP_IMPORT -> when (info.state) {
+        when {
+            info.tags.contains(BackgroundOperationWorker.TAG_IMPORT) -> when (info.state) {
                 WorkInfo.State.SUCCEEDED -> {
                     val refreshed = withContext(Dispatchers.IO) {
                         database.loadSummary() to database.loadPlayerNames()
@@ -153,7 +156,7 @@ private fun PredictorScreen() {
                 }
                 else -> Unit
             }
-            BackgroundOperationWorker.OP_TRAIN -> if (info.state == WorkInfo.State.SUCCEEDED) {
+            info.tags.contains(BackgroundOperationWorker.TAG_TRAIN) && info.state == WorkInfo.State.SUCCEEDED -> {
                 trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
             }
         }
