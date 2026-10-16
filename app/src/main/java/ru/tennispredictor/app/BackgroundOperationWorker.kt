@@ -77,19 +77,20 @@ object BackgroundOperations {
             .putString(BackgroundOperationWorker.KEY_OPERATION, BackgroundOperationWorker.OP_IMPORT)
             .putStringArray(BackgroundOperationWorker.KEY_URIS, uris.map(Uri::toString).toTypedArray())
             .build()
-        enqueue(context, input)
+        enqueue(context, input, BackgroundOperationWorker.TAG_IMPORT)
     }
 
     fun enqueueTraining(context: Context) {
         val input = workDataOf(
             BackgroundOperationWorker.KEY_OPERATION to BackgroundOperationWorker.OP_TRAIN
         )
-        enqueue(context, input)
+        enqueue(context, input, BackgroundOperationWorker.TAG_TRAIN)
     }
 
-    private fun enqueue(context: Context, input: Data) {
+    private fun enqueue(context: Context, input: Data, tag: String) {
         val request = OneTimeWorkRequestBuilder<BackgroundOperationWorker>()
             .setInputData(input)
+            .addTag(tag)
             .build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             BackgroundOperationWorker.UNIQUE_WORK_NAME,
@@ -340,6 +341,8 @@ class BackgroundOperationWorker(
         const val KEY_ERROR = "error"
         const val OP_IMPORT = "import_archives"
         const val OP_TRAIN = "train_model"
+        const val TAG_IMPORT = "tennis_predict_import"
+        const val TAG_TRAIN = "tennis_predict_train"
         private const val NOTIFICATION_ID = 6102
         private const val NOTIFICATION_CHANNEL_ID = "tennis_predict_long_operations"
     }
