@@ -201,8 +201,15 @@ object ModelTrainer {
         TrainingPreset("standard", iterations = 140, learningRate = 0.08, l2Strength = 0.01)
     )
 
-    fun trainAndEvaluate(history: List<StoredMatch>): ModelComparisonReport {
-        val preparation = prepareSamples(history)
+    fun trainAndEvaluate(
+        history: List<StoredMatch>,
+        onProgress: (percentage: Int, message: String) -> Unit = { _, _ -> }
+    ): ModelComparisonReport {
+        onProgress(1, "Подготовка истории матчей")
+        val preparation = prepareSamples(history) { percentage ->
+            onProgress(2 + percentage * 42 / 100, "Подготовка исторических матчей")
+        }
+        onProgress(45, "Построение временных интервалов")
         val samples = preparation.samples
         if (samples.size < MINIMUM_DATED_MATCHES) {
             throw IllegalStateException(
@@ -250,14 +257,25 @@ object ModelTrainer {
         }
 
         val candidates = mutableListOf<ModelCandidateResult>()
+        val totalCandidates = featureProfiles.size * trainingPresets.size
+        var completedCandidates = 0
         for (profile in featureProfiles) {
             for (preset in trainingPresets) {
                 val spec = CandidateSpec(profile, preset)
-                val foldResults = foldData.map { (startDate, train, test) ->
+                val candidateNumber = completedCandidates + 1
+                val foldResults = foldData.mapIndexed { foldIndex, (startDate, train, test) ->
                     val model = fit(
                         train = train,
                         trainedThroughDate = train.maxOf { it.date }.toString(),
-                        spec = spec
+                        spec = spec,
+                        onIterationProgress = { iterationProgress ->
+                            val foldProgress = (foldIndex + iterationProgress / 100.0) / foldData.size
+                            val totalProgress = (completedCandidates + foldProgress) / totalCandidates
+                            onProgress(
+                                47 + (totalProgress * 34).toInt(),
+                                "Обучение варианта $candidateNumber/$totalCandidates"
+                            )
+                        }
                     )
                     val endDate = test.maxOf { it.date }.toString()
                     TemporalValidationFold(
@@ -280,12 +298,19 @@ object ModelTrainer {
                     meanLogLoss = foldResults.map { it.modelMetrics.logLoss }.average(),
                     meanBrierScore = foldResults.map { it.modelMetrics.brierScore }.average()
                 )
+                completedCandidates++
+                onProgress(
+                    47 + completedCandidates * 34 / totalCandidates,
+                    "Проверено вариантов: $completedCandidates/$totalCandidates"
+                )
             }
         }
 
         // The factor ablations use identical temporal folds and optimization presets,
         // so each delta is a paired comparison rather than a comparison across different periods.
+        onProgress(82, "Проверка полезности формы и личных встреч")
         val featureEffects = evaluateFeatureEffects(candidates)
+        onProgress(84, "Выбор конфигурации по результатам проверок")
         val annotatedCandidates = candidates.map { candidate ->
             val eloGate = passesEloTemporalGate(candidate)
             val evidenceGate = passesFeatureEvidence(candidate, featureEffects)
@@ -331,10 +356,14 @@ object ModelTrainer {
         if (development.size < 10 || finalHoldout.size < 5) {
             throw IllegalStateException("Недостаточно матчей для независимой финальной проверки.")
         }
+        onProgress(87, "Независимая финальная проверка")
         val holdoutModel = fit(
             train = development,
             trainedThroughDate = development.maxOf { it.date }.toString(),
-            spec = selectedSpec
+            spec = selectedSpec,
+            onIterationProgress = { percentage ->
+                onProgress(87 + percentage * 3 / 100, "Независимая финальная проверка")
+            }
         )
         val eloHoldoutMetrics = calculateMetrics(
             finalHoldout,
@@ -346,13 +375,17 @@ object ModelTrainer {
         )
 
         // Refit selected coefficients on every eligible historic row for future use.
+        onProgress(91, "Финальное обучение на всей истории")
         val fullHistoryModel = fit(
             train = samples,
             trainedThroughDate = samples.maxOf { it.date }.toString(),
-            spec = selectedSpec
+            spec = selectedSpec,
+            onIterationProgress = { percentage ->
+                onProgress(91 + percentage * 8 / 100, "Финальное обучение на всей истории")
+            }
         ).copy(recommendedForPrediction = useLogistic)
 
-        return ModelComparisonReport(
+        val completedReport = ModelComparisonReport(
             eligibleMatches = samples.size,
             excludedUndatedMatches = preparation.excludedUndatedMatches,
             excludedInvalidMatches = preparation.excludedInvalidMatches,
@@ -379,6 +412,8 @@ object ModelTrainer {
             featureEffects = featureEffects,
             logisticSelectedForPrediction = useLogistic
         )
+        onProgress(100, "Обучение завершено")
+        return completedReport
     }
 
     private data class FeatureComparisonSpec(
@@ -568,16 +603,23 @@ object ModelTrainer {
     }
 
     /** Feature snapshots are calculated strictly before the outcome on that date. */
-    internal fun prepareSamples(history: List<StoredMatch>): ModelFeaturePreparation {
+    internal fun prepareSamples(
+        history: List<StoredMatch>,
+        onProgress: (percentage: Int) -> Unit = {}
+    ): ModelFeaturePreparation {
         val dated = mutableListOf<DatedMatch>()
         var excludedUndated = 0
         var excludedInvalid = 0
+        val historyProgressInterval = maxOf(1, history.size / 100)
 
-        history.forEach { stored ->
+        history.forEachIndexed { historyIndex, stored ->
+            if (historyIndex % historyProgressInterval == 0) {
+                onProgress(historyIndex * 60 / history.size.coerceAtLeast(1))
+            }
             val date = parseDate(stored.record.date)
             if (date == null) {
                 excludedUndated++
-                return@forEach
+                return@forEachIndexed
             }
 
             val record = stored.record
@@ -591,7 +633,7 @@ object ModelTrainer {
                 (winnerKey != keyA && winnerKey != keyB)
             ) {
                 excludedInvalid++
-                return@forEach
+                return@forEachIndexed
             }
 
             // Winner-first ATP/WTA archives are normalized to a stable name order.
@@ -611,8 +653,15 @@ object ModelTrainer {
         val samples = mutableListOf<PreparedModelSample>()
         val matchesByDate = dated.sortedWith(compareBy<DatedMatch> { it.date }.thenBy { it.id })
             .groupBy { it.date }.toSortedMap()
+        val dateEntries = matchesByDate.entries.toList()
+        val dateProgressInterval = maxOf(1, dateEntries.size / 100)
 
-        for ((date, dayMatches) in matchesByDate) {
+        dateEntries.forEachIndexed { dateIndex, dateEntry ->
+            val date = dateEntry.key
+            val dayMatches = dateEntry.value
+            if (dateIndex % dateProgressInterval == 0) {
+                onProgress(60 + dateIndex * 40 / dateEntries.size.coerceAtLeast(1))
+            }
             // Freeze every match's features before updating any result from this date.
             dayMatches.forEach { match ->
                 val stateA = states.getOrPut(match.keyA) { PlayerState() }
@@ -706,20 +755,23 @@ object ModelTrainer {
             }
         }
 
+        onProgress(100)
         return ModelFeaturePreparation(samples, excludedUndated, excludedInvalid)
     }
 
     private fun fit(
         train: List<PreparedModelSample>,
         trainedThroughDate: String,
-        spec: CandidateSpec
+        spec: CandidateSpec,
+        onIterationProgress: (percentage: Int) -> Unit = {}
     ): LogisticRegressionModel {
         require(train.isNotEmpty())
         require(train.map { it.label }.distinct().size == 2) {
             "Для обучения нужны победы обоих вариантов целевого исхода."
         }
         val weights = DoubleArray(spec.profile.indices.size + 1)
-        repeat(spec.preset.iterations) {
+        val progressInterval = maxOf(1, spec.preset.iterations / 10)
+        repeat(spec.preset.iterations) { iteration ->
             val gradients = DoubleArray(weights.size)
             train.forEach { sample ->
                 var logit = weights[0]
@@ -737,6 +789,12 @@ object ModelTrainer {
                 var gradient = gradients[index] * inverseCount
                 if (index > 0) gradient += spec.preset.l2Strength * weights[index]
                 weights[index] -= spec.preset.learningRate * gradient
+            }
+            val completedIterations = iteration + 1
+            if (completedIterations % progressInterval == 0 ||
+                completedIterations == spec.preset.iterations
+            ) {
+                onIterationProgress(completedIterations * 100 / spec.preset.iterations)
             }
         }
         return LogisticRegressionModel(

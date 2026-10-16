@@ -1,5 +1,6 @@
 package ru.tennispredictor.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,6 +21,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,18 +38,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-private data class ImportUiResult(
-    val inserted: Int,
-    val duplicates: Int,
-    val invalidRows: Int,
-    val parseIssues: List<String>,
-    val summary: MatchDatabaseSummary,
-    val playerNames: List<String>,
-    val selectedFiles: Int,
-    val filesWithMatches: Int,
-    val fileErrors: List<String>
-)
 
 private object HistorySummaryCache {
     @Volatile var summary: MatchDatabaseSummary? = null
@@ -73,6 +64,25 @@ private fun PredictorScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val database = remember { MatchDatabaseProvider.get(context.applicationContext) }
+    val workManager = remember { WorkManager.getInstance(context.applicationContext) }
+    val operationWorkInfos by remember(workManager) {
+        workManager.getWorkInfosForUniqueWorkFlow(BackgroundOperationWorker.UNIQUE_WORK_NAME)
+    }.collectAsState(initial = emptyList())
+    val operationWorkInfo = operationWorkInfos.firstOrNull { !it.state.isFinished }
+        ?: operationWorkInfos.lastOrNull()
+    val operationInProgress = operationWorkInfo?.state?.isFinished == false
+    val operationType = when {
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_IMPORT) == true -> BackgroundOperationWorker.OP_IMPORT
+        operationWorkInfo?.tags?.contains(BackgroundOperationWorker.TAG_TRAIN) == true -> BackgroundOperationWorker.OP_TRAIN
+        else -> null
+    }
+    val isImporting = operationInProgress && operationType == BackgroundOperationWorker.OP_IMPORT
+    val importProgress = if (isImporting) {
+        operationWorkInfo?.progress?.getInt(BackgroundOperationWorker.KEY_PROGRESS, 0) ?: 0
+    } else 0
+    val importProgressStatus = operationWorkInfo?.progress?.getString(BackgroundOperationWorker.KEY_STATUS)
+        ?: "Подготовка архивов"
+    val startAfterNotificationPermission = rememberNotificationPermissionGate()
 
     var playerA by remember { mutableStateOf("Player A") }
     var playerB by remember { mutableStateOf("Player B") }
@@ -91,7 +101,6 @@ private fun PredictorScreen() {
         mutableStateOf(RatingSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
     }
     var playerNames by remember { mutableStateOf<List<String>>(emptyList()) }
-    var isImporting by remember { mutableStateOf(false) }
     var importMessage by remember { mutableStateOf<String?>(null) }
     var importMessageIsError by remember { mutableStateOf(false) }
 
@@ -117,89 +126,58 @@ private fun PredictorScreen() {
         trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
     }
 
+    LaunchedEffect(operationWorkInfo?.id, operationWorkInfo?.state) {
+        val info = operationWorkInfo ?: return@LaunchedEffect
+        when {
+            info.tags.contains(BackgroundOperationWorker.TAG_IMPORT) -> when (info.state) {
+                WorkInfo.State.SUCCEEDED -> {
+                    val refreshed = withContext(Dispatchers.IO) {
+                        database.loadSummary() to database.loadPlayerNames()
+                    }
+                    val summary = refreshed.first
+                    val names = refreshed.second
+                    HistorySummaryCache.summary = summary
+                    HistorySummaryCache.playerNames = names
+                    matchCount = summary.matchCount
+                    hardMatchCount = summary.hardMatchCount
+                    clayMatchCount = summary.clayMatchCount
+                    grassMatchCount = summary.grassMatchCount
+                    ratingSnapshot = summary.ratings
+                    playerNames = names
+                    importMessageIsError = false
+                    importMessage = info.outputData.getString(BackgroundOperationWorker.KEY_MESSAGE)
+                        ?: "Импорт архивов завершён."
+                    historicalMessage = null
+                }
+                WorkInfo.State.FAILED -> {
+                    importMessageIsError = true
+                    importMessage = info.outputData.getString(BackgroundOperationWorker.KEY_ERROR)
+                        ?: "Не удалось импортировать выбранные CSV-файлы."
+                }
+                else -> Unit
+            }
+            info.tags.contains(BackgroundOperationWorker.TAG_TRAIN) && info.state == WorkInfo.State.SUCCEEDED -> {
+                trainedModel = withContext(Dispatchers.IO) { ModelStore(context).load() }
+            }
+        }
+    }
+
     val csvPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            scope.launch {
-                isImporting = true
-                importMessage = null
-                try {
-                    val result = withContext(Dispatchers.IO) {
-                        val combinedRecords = mutableListOf<MatchRecord>()
-                        val parseIssues = mutableListOf<String>()
-                        val fileErrors = mutableListOf<String>()
-                        var invalidRows = 0
-                        var filesWithMatches = 0
-
-                        uris.forEachIndexed { index, uri ->
-                            try {
-                                val csv = requireNotNull(context.contentResolver.openInputStream(uri)) {
-                                    "Не удалось открыть файл ${index + 1}."
-                                }.bufferedReader(Charsets.UTF_8).use { it.readText() }
-
-                                val parsed = MatchCsvImporter.parse(csv)
-                                invalidRows += parsed.invalidRows
-                                if (parseIssues.size < 5) {
-                                    parseIssues += parsed.issues.take(5 - parseIssues.size)
-                                }
-                                if (parsed.records.isEmpty()) {
-                                    fileErrors += "Файл ${index + 1}: корректных матчей не найдено."
-                                } else {
-                                    combinedRecords += parsed.records
-                                    filesWithMatches++
-                                }
-                            } catch (exception: Exception) {
-                                fileErrors += "Файл ${index + 1}: ${exception.message ?: "ошибка чтения"}."
-                            }
-                        }
-
-                        require(combinedRecords.isNotEmpty()) {
-                            "Не удалось найти корректные матчи ни в одном из выбранных CSV."
-                        }
-
-                        val saved = database.insertMatches(combinedRecords)
-                        database.reconcileSavedPredictions()
-                        ImportUiResult(
-                            inserted = saved.inserted,
-                            duplicates = saved.duplicates,
-                            invalidRows = invalidRows,
-                            parseIssues = parseIssues,
-                            summary = database.loadSummary(),
-                            playerNames = database.loadPlayerNames(),
-                            selectedFiles = uris.size,
-                            filesWithMatches = filesWithMatches,
-                            fileErrors = fileErrors
-                        )
-                    }
-                    HistorySummaryCache.summary = result.summary
-                    HistorySummaryCache.playerNames = result.playerNames
-                    matchCount = result.summary.matchCount
-                    hardMatchCount = result.summary.hardMatchCount
-                    clayMatchCount = result.summary.clayMatchCount
-                    grassMatchCount = result.summary.grassMatchCount
-                    ratingSnapshot = result.summary.ratings
-                    playerNames = result.playerNames
-                    importMessageIsError = false
-                    importMessage = buildString {
-                        append("Обработано CSV: ${result.filesWithMatches}/${result.selectedFiles}. ")
-                        append("Добавлено матчей: ${result.inserted}; повторов пропущено: ${result.duplicates}.")
-                        if (result.invalidRows > 0) append(" Ошибочных строк: ${result.invalidRows}.")
-                        if (result.parseIssues.isNotEmpty()) {
-                            append(" Пример ошибки строки: ${result.parseIssues.first()}.")
-                        }
-                        if (result.fileErrors.isNotEmpty()) {
-                            append(" Проблемы с файлами: ${result.fileErrors.take(3).joinToString(" ")}")
-                            if (result.fileErrors.size > 3) append(" И ещё: ${result.fileErrors.size - 3}.")
-                        }
-                    }
-                    historicalMessage = null
-                } catch (exception: Exception) {
-                    importMessageIsError = true
-                    importMessage = exception.message ?: "Не удалось импортировать выбранные CSV-файлы."
-                } finally {
-                    isImporting = false
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
                 }
+            }
+            startAfterNotificationPermission {
+                importMessage = null
+                importMessageIsError = false
+                BackgroundOperations.enqueueImport(context, uris)
             }
         }
     }
@@ -587,13 +565,37 @@ private fun PredictorScreen() {
                         )
                         Button(
                             onClick = { csvPicker.launch(arrayOf("*/*")) },
-                            enabled = !isImporting,
+                            enabled = !operationInProgress,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(if (isImporting) "Импортируем…" else "Выбрать CSV-файлы")
+                            Text(
+                                when {
+                                    isImporting -> "Импортируем… $importProgress%"
+                                    operationInProgress -> "Выполняется другая задача…"
+                                    else -> "Выбрать CSV-файлы"
+                                }
+                            )
                         }
                         if (isImporting) {
-                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("$importProgress%", fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        importProgressStatus,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = importProgress / 100f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                         importMessage?.let {
                             Text(

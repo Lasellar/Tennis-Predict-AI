@@ -10,8 +10,8 @@ android {
         applicationId = "ru.tennispredictor.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 61
-        versionName = "0.6.1"
+        versionCode = 62
+        versionName = "0.6.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes { release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
@@ -26,6 +26,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")

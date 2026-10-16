@@ -19,7 +19,7 @@ data class CsvParseResult(
  * tourney_date,winner_name,loser_name,surface.
  */
 object MatchCsvImporter {
-    fun parse(csv: String): CsvParseResult {
+    fun parse(csv: String, onProgress: ((processedLines: Int, totalLines: Int) -> Unit)? = null): CsvParseResult {
         val lines = csv.removePrefix("\uFEFF").lineSequence().toList()
         val headerLineIndex = lines.indexOfFirst { it.isNotBlank() }
         require(headerLineIndex >= 0) { "CSV-файл пуст." }
@@ -51,10 +51,18 @@ object MatchCsvImporter {
         val issues = mutableListOf<String>()
         var dataRows = 0
         var invalidRows = 0
+        val totalLines = (lines.size - headerLineIndex - 1).coerceAtLeast(0)
+        val progressInterval = maxOf(1, totalLines / 100)
 
         for (lineIndex in headerLineIndex + 1 until lines.size) {
             val line = lines[lineIndex]
-            if (line.isBlank()) continue
+            val processedLines = lineIndex - headerLineIndex
+            if (line.isBlank()) {
+                if (processedLines % progressInterval == 0 || processedLines == totalLines) {
+                    onProgress?.invoke(processedLines, totalLines)
+                }
+                continue
+            }
             dataRows++
             try {
                 val fields = parseLine(line, delimiter)
@@ -94,7 +102,11 @@ object MatchCsvImporter {
                     issues += "Строка ${lineIndex + 1}: ${exception.message ?: "не удалось прочитать матч"}"
                 }
             }
+            if (processedLines % progressInterval == 0 || processedLines == totalLines) {
+                onProgress?.invoke(processedLines, totalLines)
+            }
         }
+        if (totalLines == 0) onProgress?.invoke(0, 0)
 
         return CsvParseResult(
             records = records,
