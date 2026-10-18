@@ -58,7 +58,16 @@ class PlayerNameSearchTest {
 
     @Test
     fun unknownRussianNamesUseTransliterationFallback() {
-        assertEquals("medvedev", transliterateRussianQuery("медведев"))
-        assertTrue(playerNameMatchesQuery("Daniil Medvedev", "медведев"))
+        assertEquals("kasatkina", transliterateRussianQuery("касаткина"))
+        assertTrue(playerNameMatchesQuery("Daria Kasatkina", "Касаткина"))
+    }
+
+    @Test
+    fun andreevaAliasUsesCorrectCyrillicSpelling() {
+        assertTrue(playerNameMatchesQuery("Mirra Andreeva", "Андреева"))
+        assertEquals(
+            listOf("Mirra Andreeva"),
+            findPlayerSuggestions(listOf("Mirra Andreeva"), "Мирра Андреева")
+        )
     }
 }
