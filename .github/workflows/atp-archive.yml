@@ -41,11 +41,11 @@ jobs:
       - name: Benchmark lower-tier history against main-tour baseline
         run: |
           python scripts/benchmark_extended_archives.py \
-            --atp-main "data/benchmark/atp_2010_$YEAR.csv" \
-            --wta-main "data/benchmark/wta_2010_$YEAR.csv" \
-            --challenger-men "data/benchmark/atp_challenger_2010_$YEAR.csv" \
-            --itf-men "data/benchmark/itf_men_2010_$YEAR.csv" \
-            --itf-women "data/benchmark/itf_women_2010_$YEAR.csv" \
+            --atp-main "data/benchmark/atp_2010_$ARCHIVE_YEAR.csv" \
+            --wta-main "data/benchmark/wta_2010_$ARCHIVE_YEAR.csv" \
+            --challenger-men "data/benchmark/atp_challenger_2010_$ARCHIVE_YEAR.csv" \
+            --itf-men "data/benchmark/itf_men_2010_$ARCHIVE_YEAR.csv" \
+            --itf-women "data/benchmark/itf_women_2010_$ARCHIVE_YEAR.csv" \
             --output benchmarks/extended_archive_benchmark.md
 
       - name: Package importable CSVs and source attribution
