@@ -75,7 +75,7 @@ class ExtendedTourArchiveTests(unittest.TestCase):
             )
             matches = read_source_file(path, "itf_men", "2024-12-31")
         self.assertEqual(1, len(matches))
-        self.assertEqual("clay", matches[0].surface if False else matches[0].surface)
+        self.assertEqual("hard", matches[0].surface)
 
     def test_deduplication_and_export_keep_circuit_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -95,7 +95,7 @@ class ExtendedTourArchiveTests(unittest.TestCase):
             with output.open("r", encoding="utf-8", newline="") as stream:
                 rows = list(csv.DictReader(stream))
         self.assertEqual(2, len(rows))
-        self.assertEqual("circuit", "circuit" if "circuit" in rows[0] else "")
+        self.assertIn("circuit", rows[0])
         self.assertEqual("men", rows[0]["circuit"])
         self.assertEqual("challenger", rows[0]["competition"])
         self.assertEqual(rows[0]["winner"], rows[0]["player_a"])
