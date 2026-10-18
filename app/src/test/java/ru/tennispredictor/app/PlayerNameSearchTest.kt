@@ -70,4 +70,11 @@ class PlayerNameSearchTest {
             findPlayerSuggestions(listOf("Mirra Andreeva"), "Мирра Андреева")
         )
     }
+
+    @Test
+    fun hyphenatedArchiveNamesStillUseRussianAliases() {
+        assertTrue(
+            playerNameMatchesQuery("Felix Auger-Aliassime", "Феликс Оже-Алиассим")
+        )
+    }
 }
