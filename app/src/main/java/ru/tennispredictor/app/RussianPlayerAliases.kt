@@ -28,7 +28,7 @@ private val knownRussianAliases: Map<String, Set<String>> = mapOf(
     "naomi osaka" to setOf("наоми осака", "осака"),
     "jessica pegula" to setOf("джессика пегула", "пегула"),
     "mirra andreeva" to setOf("мирра андреева", "андреева")
-)
+).mapKeys { (archiveName, _) -> normalizePlayerSearchText(archiveName) }
 
 /** Normalizes punctuation and treats Russian е/ё as equivalent for search. */
 internal fun normalizePlayerSearchText(value: String): String =
