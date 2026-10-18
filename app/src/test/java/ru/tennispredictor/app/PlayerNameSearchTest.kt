@@ -1,6 +1,7 @@
 package ru.tennispredictor.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerNameSearchTest {
@@ -36,6 +37,44 @@ class PlayerNameSearchTest {
         assertEquals(
             listOf("Alex de Minaur", "Carlos Alcaraz"),
             findPlayerSuggestions(names, "al")
+        )
+    }
+
+    @Test
+    fun russianSurnameFindsCanonicalArchiveName() {
+        val names = listOf("Daniil Medvedev", "Andrey Rublev", "Karen Khachanov")
+
+        assertEquals(listOf("Daniil Medvedev"), findPlayerSuggestions(names, "Медведев"))
+        assertEquals(listOf("Andrey Rublev"), findPlayerSuggestions(names, "Рублёв"))
+        assertEquals(listOf("Karen Khachanov"), findPlayerSuggestions(names, "Хачанов"))
+    }
+
+    @Test
+    fun russianFullNameAndEYoVariantAreSupported() {
+        assertTrue(playerNameMatchesQuery("Daniil Medvedev", "Даниил Медведев"))
+        assertTrue(playerNameMatchesQuery("Andrey Rublev", "Рублёв"))
+        assertTrue(playerNameMatchesQuery("Iga Swiatek", "Швёнтек"))
+    }
+
+    @Test
+    fun unknownRussianNamesUseTransliterationFallback() {
+        assertEquals("kasatkina", transliterateRussianQuery("касаткина"))
+        assertTrue(playerNameMatchesQuery("Daria Kasatkina", "Касаткина"))
+    }
+
+    @Test
+    fun andreevaAliasUsesCorrectCyrillicSpelling() {
+        assertTrue(playerNameMatchesQuery("Mirra Andreeva", "Андреева"))
+        assertEquals(
+            listOf("Mirra Andreeva"),
+            findPlayerSuggestions(listOf("Mirra Andreeva"), "Мирра Андреева")
+        )
+    }
+
+    @Test
+    fun hyphenatedArchiveNamesStillUseRussianAliases() {
+        assertTrue(
+            playerNameMatchesQuery("Felix Auger-Aliassime", "Феликс Оже-Алиассим")
         )
     }
 }
