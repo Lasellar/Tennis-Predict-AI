@@ -39,29 +39,43 @@ internal fun normalizePlayerSearchText(value: String): String =
         .trim()
 
 /** Fallback transliteration for Cyrillic queries; known aliases take priority. */
-internal fun transliterateRussianQuery(value: String): String {
-    val map = mapOf(
-        'а' to "a", 'б' to "b", 'в' to "v", 'г' to "g", 'д' to "d",
-        'е' to "e", 'ё' to "yo", 'ж' to "zh", 'з' to "z", 'и' to "i",
-        'й' to "y", 'к' to "k", 'л' to "l", 'м' to "m", 'н' to "n",
-        'о' to "o", 'п' to "p", 'р' to "r", 'с' to "s", 'т' to "t",
-        'у' to "u", 'ф' to "f", 'х' to "kh", 'ц' to "ts", 'ч' to "ch",
-        'ш' to "sh", 'щ' to "shch", 'ъ' to "", 'ы' to "y", 'ь' to "",
-        'э' to "e", 'ю' to "yu", 'я' to "ya"
-    )
-    return value.lowercase(Locale.ROOT).map { map[it] ?: it.toString() }.joinToString("")
+private val russianToLatin = mapOf(
+    'а' to "a", 'б' to "b", 'в' to "v", 'г' to "g", 'д' to "d",
+    'е' to "e", 'ё' to "yo", 'ж' to "zh", 'з' to "z", 'и' to "i",
+    'й' to "y", 'к' to "k", 'л' to "l", 'м' to "m", 'н' to "n",
+    'о' to "o", 'п' to "p", 'р' to "r", 'с' to "s", 'т' to "t",
+    'у' to "u", 'ф' to "f", 'х' to "kh", 'ц' to "ts", 'ч' to "ch",
+    'ш' to "sh", 'щ' to "shch", 'ъ' to "", 'ы' to "y", 'ь' to "",
+    'э' to "e", 'ю' to "yu", 'я' to "ya"
+)
+
+/** Fallback transliteration for Cyrillic queries; known aliases take priority. */
+internal fun transliterateRussianQuery(value: String): String =
+    value.lowercase(Locale.ROOT).map { russianToLatin[it] ?: it.toString() }.joinToString("")
+
+internal fun playerNameAliasStartsWithQuery(archiveName: String, normalizedQuery: String): Boolean {
+    val archive = normalizePlayerSearchText(archiveName)
+    return knownRussianAliases[archive].orEmpty().any {
+        normalizePlayerSearchText(it).startsWith(normalizedQuery)
+    }
 }
 
 internal fun playerNameMatchesQuery(archiveName: String, rawQuery: String): Boolean {
     val query = normalizePlayerSearchText(rawQuery)
     if (query.length < 2) return false
-
     val archive = normalizePlayerSearchText(archiveName)
-    if (archive.contains(query)) return true
+    val transliterated = normalizePlayerSearchText(transliterateRussianQuery(rawQuery))
+    return playerNameMatchesNormalizedQuery(archive, query, transliterated)
+}
 
-    val aliases = knownRussianAliases[archive]
-    if (aliases.orEmpty().any { normalizePlayerSearchText(it).contains(query) }) return true
-
-    val transliterated = normalizePlayerSearchText(transliterateRussianQuery(query))
-    return transliterated.length >= 2 && archive.contains(transliterated)
+internal fun playerNameMatchesNormalizedQuery(
+    normalizedArchive: String,
+    normalizedQuery: String,
+    normalizedTransliteration: String
+): Boolean {
+    if (normalizedQuery.length < 2) return false
+    if (normalizedArchive.contains(normalizedQuery)) return true
+    val aliases = knownRussianAliases[normalizedArchive]
+    if (aliases.orEmpty().any { normalizePlayerSearchText(it).contains(normalizedQuery) }) return true
+    return normalizedTransliteration.length >= 2 && normalizedArchive.contains(normalizedTransliteration)
 }
