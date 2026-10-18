@@ -9,35 +9,39 @@ internal fun findPlayerSuggestions(
     rawQuery: String,
     limit: Int = 8
 ): List<String> {
-    val query = rawQuery.trim()
-    if (query.length < 2 || limit <= 0) return emptyList()
+    val normalizedQuery = normalizePlayerSearchText(rawQuery)
+    if (normalizedQuery.length < 2 || limit <= 0) return emptyList()
 
+    // Compute transliteration once per keystroke, not once for every player in the database.
+    val normalizedTransliteration =
+        normalizePlayerSearchText(transliterateRussianQuery(rawQuery))
     val prefixMatches = ArrayList<String>(limit)
     val otherMatches = ArrayList<String>(limit)
-    for (name in playerNames) {
-        if (normalizePlayerSearchText(name) == normalizePlayerSearchText(query)) continue
 
+    for (name in playerNames) {
         val normalizedName = normalizePlayerSearchText(name)
-        val normalizedQuery = normalizePlayerSearchText(query)
+        if (normalizedName == normalizedQuery) continue
+
+        val matches = playerNameMatchesNormalizedQuery(
+            normalizedName,
+            normalizedQuery,
+            normalizedTransliteration
+        )
+        if (!matches) continue
+
+        val transliteratedPrefix = normalizedTransliteration.length >= 2 &&
+            (normalizedName.startsWith(normalizedTransliteration) ||
+                normalizedName.split(" ").any { it.startsWith(normalizedTransliteration) })
         val isPrefix = normalizedName.startsWith(normalizedQuery) ||
-            playerNameMatchesQuery(name, query) &&
-            transliteratedOrAliasPrefixMatch(name, query)
+            transliteratedPrefix ||
+            playerNameAliasStartsWithQuery(name, normalizedQuery)
 
         if (isPrefix) {
             if (prefixMatches.size < limit) prefixMatches.add(name)
-        } else if (otherMatches.size < limit && playerNameMatchesQuery(name, query)) {
+        } else if (otherMatches.size < limit) {
             otherMatches.add(name)
         }
         if (prefixMatches.size >= limit && otherMatches.size >= limit) break
     }
     return (prefixMatches + otherMatches).take(limit)
-}
-
-private fun transliteratedOrAliasPrefixMatch(archiveName: String, query: String): Boolean {
-    val normalizedQuery = normalizePlayerSearchText(query)
-    val latinQuery = normalizePlayerSearchText(transliterateRussianQuery(query))
-    val normalizedArchive = normalizePlayerSearchText(archiveName)
-    return normalizedArchive.startsWith(latinQuery) ||
-        normalizedArchive.split(" ").any { it.startsWith(latinQuery) } ||
-        (normalizedQuery.length >= 2 && playerNameMatchesQuery(archiveName, query))
 }
