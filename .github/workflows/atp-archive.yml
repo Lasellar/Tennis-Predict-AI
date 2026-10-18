@@ -1,4 +1,4 @@
-name: Build importable ATP and WTA CSV archives
+name: Build importable ATP, WTA, Challenger and ITF CSV archives
 
 on:
   push:
@@ -6,6 +6,10 @@ on:
     paths:
       - "scripts/download_tour_archives.py"
       - "scripts/download_atp_archive.py"
+      - "scripts/download_extended_tour_archives.py"
+      - "scripts/benchmark_extended_archives.py"
+      - "scripts/test_extended_tour_archives.py"
+      - "scripts/test_benchmark_extended_archives.py"
       - ".github/workflows/atp-archive.yml"
   workflow_dispatch:
 
@@ -24,51 +28,81 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download current ATP and WTA archives
+      - name: Test archive filters and chronological benchmark
+        run: python -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Download current ATP/WTA and lower-tier archives
         run: |
           YEAR="$(date -u +%Y)"
           echo "ARCHIVE_YEAR=$YEAR" >> "$GITHUB_ENV"
           python scripts/download_tour_archives.py --start 2010 --end "$YEAR"
+          python scripts/download_extended_tour_archives.py --start 2010 --end "$YEAR"
+
+      - name: Benchmark lower-tier history against main-tour baseline
+        run: |
+          python scripts/benchmark_extended_archives.py \
+            --atp-main "data/benchmark/atp_2010_$ARCHIVE_YEAR.csv" \
+            --wta-main "data/benchmark/wta_2010_$ARCHIVE_YEAR.csv" \
+            --challenger-men "data/benchmark/atp_challenger_2010_$ARCHIVE_YEAR.csv" \
+            --itf-men "data/benchmark/itf_men_2010_$ARCHIVE_YEAR.csv" \
+            --itf-women "data/benchmark/itf_women_2010_$ARCHIVE_YEAR.csv" \
+            --output benchmarks/extended_archive_benchmark.md
 
       - name: Package importable CSVs and source attribution
         run: |
           mkdir -p dist
-          cp "data/benchmark/atp_2010_${ARCHIVE_YEAR}.csv" dist/
-          cp "data/benchmark/wta_2010_${ARCHIVE_YEAR}.csv" dist/
+          cp "data/benchmark/atp_2010_$ARCHIVE_YEAR.csv" dist/
+          cp "data/benchmark/wta_2010_$ARCHIVE_YEAR.csv" dist/
+          cp "data/benchmark/atp_challenger_2010_$ARCHIVE_YEAR.csv" dist/
+          cp "data/benchmark/itf_men_2010_$ARCHIVE_YEAR.csv" dist/
+          cp "data/benchmark/itf_women_2010_$ARCHIVE_YEAR.csv" dist/
+          cp benchmarks/extended_archive_benchmark.md dist/
           cat > dist/SOURCE_AND_LICENSE.txt <<'EOF'
-          Primary data: Jeff Sackmann / Tennis Abstract ATP and WTA match results.
+          Primary ATP/WTA and lower-tier results: Jeff Sackmann / Tennis Abstract.
           Archival mirror: https://github.com/Aneeshers/tennis-sackmann-archive
           Primary license: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0).
 
-          Current-season supplement: Valuebetennis, Tennis results and odds since 2021.
+          Current-season ATP/WTA main-tour supplement: Valuebetennis, Tennis results and odds since 2021.
           Source: https://www.valuebetennis.com/en/donnees.htm
           Supplement license: Creative Commons Attribution 4.0 (CC BY 4.0).
 
-          These combined files include CC BY-NC-SA material and are intended for
-          non-commercial research/evaluation. Attribute Jeff Sackmann / Tennis Abstract
-          and Valuebetennis. Obtain permission from the rights holders for commercial use.
+          The combined ZIP contains CC BY-NC-SA material and is intended for non-commercial
+          research/evaluation. Attribute Jeff Sackmann / Tennis Abstract and Valuebetennis.
+          Obtain permission from rights holders before commercial use.
           EOF
           cat > dist/README_ARCHIVES.txt <<EOF
-          Tennis Predict AI — importable historical match archives
-          Seasons: 2010–${ARCHIVE_YEAR}
-          CSV schema: date, player_a, player_b, winner, surface
-          Archive date cutoff: build-day UTC, inclusive.
-          Import both files using the app's multi-select CSV importer.
-          Results are deduplicated by date, winner and loser. Top-tour current-season results
-          after the primary mirror snapshot are supplemented from Valuebetennis data.
+          Tennis Predict AI 0.7.0 — importable historical match archives
+          Seasons: 2010–$ARCHIVE_YEAR
+          CSV schema: date, player_a, player_b, winner, surface, circuit, competition
+          The Android importer accepts these files; circuit/competition are extra metadata columns.
+          Files: ATP main tour, WTA main tour, ATP Challenger men, ITF men, ITF women.
+          Use ATP + Challenger + ITF-men for men's history, or WTA + ITF-women for women's history.
+          Avoid mixing men's and women's files in one app history: imported data currently share one local database.
+          Source dates are usually tournament-week start dates, not exact match dates.
+          Lower-tier coverage comes from the public research archive and may lag or be incomplete.
+          CSVs are deduplicated by tournament date, winner and loser within each export.
+          The benchmark compares chronological main-tour Elo against Elo enriched with lower-tier history.
           EOF
           cd dist
-          zip -9 "tennis_predict_atp_wta_2010_${ARCHIVE_YEAR}.zip" "atp_2010_${ARCHIVE_YEAR}.csv" "wta_2010_${ARCHIVE_YEAR}.csv" README_ARCHIVES.txt SOURCE_AND_LICENSE.txt
-          sha256sum "tennis_predict_atp_wta_2010_${ARCHIVE_YEAR}.zip" > SHA256SUMS.txt
+          zip -9 "tennis_predict_atp_wta_challenger_itf_2010_$ARCHIVE_YEAR.zip" \
+            "atp_2010_$ARCHIVE_YEAR.csv" "wta_2010_$ARCHIVE_YEAR.csv" \
+            "atp_challenger_2010_$ARCHIVE_YEAR.csv" "itf_men_2010_$ARCHIVE_YEAR.csv" \
+            "itf_women_2010_$ARCHIVE_YEAR.csv" "extended_archive_benchmark.md" \
+            README_ARCHIVES.txt SOURCE_AND_LICENSE.txt
+          sha256sum "tennis_predict_atp_wta_challenger_itf_2010_$ARCHIVE_YEAR.zip" > SHA256SUMS.txt
 
-      - name: Upload ready-to-import CSV archives
+      - name: Upload ready-to-import archives and benchmark
         uses: actions/upload-artifact@v4
         with:
-          name: tennis-predict-atp-wta-csv-archives-2010-${{ env.ARCHIVE_YEAR }}
+          name: tennis-predict-all-tour-csv-archives-0.7.0
           path: |
             dist/atp_2010_*.csv
             dist/wta_2010_*.csv
-            dist/tennis_predict_atp_wta_2010_*.zip
+            dist/atp_challenger_2010_*.csv
+            dist/itf_men_2010_*.csv
+            dist/itf_women_2010_*.csv
+            dist/extended_archive_benchmark.md
+            dist/tennis_predict_atp_wta_challenger_itf_2010_*.zip
             dist/README_ARCHIVES.txt
             dist/SOURCE_AND_LICENSE.txt
             dist/SHA256SUMS.txt
